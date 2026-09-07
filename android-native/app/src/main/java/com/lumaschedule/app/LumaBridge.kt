@@ -10,6 +10,7 @@ import android.os.SystemClock
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import com.lumaschedule.app.data.LumaDatabase
+import com.lumaschedule.app.reminders.CourseReminderEngine
 import com.lumaschedule.app.widgets.BootReceiver
 import com.lumaschedule.app.widgets.NextCourseWidgetProvider
 import com.lumaschedule.app.widgets.ReminderReceiver
@@ -24,6 +25,7 @@ class LumaBridge(
     private val launchStarted: Long
 ) {
     @Volatile private var uiReadyMs: Long = -1
+    private val reminderEngine by lazy(LazyThreadSafetyMode.NONE) { CourseReminderEngine(activity.applicationContext) }
 
     @JavascriptInterface
     fun request(id: String, command: String, payload: String?) {
@@ -69,6 +71,7 @@ class LumaBridge(
             "commit_import_bundle" -> database.commitImport(args.getJSONObject("bundle")).toString()
             "update_widget_snapshot" -> JSONObject().put("value", updateWidget(args.getJSONObject("snapshot"))).toString()
             "test_notification" -> JSONObject().put("value", sendTestNotification()).toString()
+            "request_notification_permission" -> JSONObject().put("value", activity.ensureNotificationPermissionBlocking()).toString()
             "schedule_native_reminder" -> JSONObject().put("value", scheduleReminder(args.getJSONObject("reminder"))).toString()
             "cancel_native_reminder" -> JSONObject().put("value", cancelReminder(args.getJSONObject("reminder").getInt("id"))).toString()
             "get_course_reminder_settings" -> {
@@ -82,13 +85,14 @@ class LumaBridge(
                 database.setSettingRaw("reminders.course.default", normalized.toString())
                 normalized.toString()
             }
-            "sync_course_reminders" -> JSONObject()
-                .put("enabled", false)
-                .put("futureCount", 0)
-                .put("scheduledCount", 0)
-                .put("cancelledCount", 0)
-                .put("skippedCount", 0)
-                .toString()
+            "sync_course_reminders" -> {
+                val settings = database.getSettingRaw("reminders.course.default")
+                    ?.let { runCatching { JSONObject(it) }.getOrNull() }
+                if (settings?.optBoolean("enabled", false) == true && !activity.ensureNotificationPermissionBlocking()) {
+                    error("没有获得系统通知权限，无法安排课程提醒。")
+                }
+                reminderEngine.sync().toString()
+            }
             else -> error("Native command not implemented yet: $command")
         }
     }
