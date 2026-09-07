@@ -7,7 +7,7 @@
   import Widgets from './lib/pages/Widgets.svelte';
   import Settings from './lib/pages/Settings.svelte';
   import type { Course, GlassSettings, PageId, ScheduleSnapshot } from './lib/types';
-  import { courses as demoCourses, defaultGlass } from './lib/state';
+  import { defaultGlass } from './lib/state';
   import { getBootstrap, getScheduleSnapshot, publishWidgetSnapshot } from './lib/tauri';
 
   let page: PageId = 'today';
@@ -37,9 +37,8 @@
       if (saved) {
         try { glass = { ...defaultGlass, ...JSON.parse(saved) }; } catch {}
       }
-      const fallback = import.meta.env.DEV ? demoCourses : [];
-      scheduleSnapshot = { courses: fallback };
-      runtimeCourses = fallback;
+      scheduleSnapshot = { courses: [] };
+      runtimeCourses = [];
       liveData = false;
     } finally {
       runtimeReady = true;
