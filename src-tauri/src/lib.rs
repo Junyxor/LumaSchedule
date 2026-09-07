@@ -49,6 +49,16 @@ fn list_schedule_courses(db: State<'_, AppDb>) -> Result<Vec<db::CourseView>, St
 }
 
 #[tauri::command]
+fn save_schedule_course(db: State<'_, AppDb>, course: db::CourseMutation) -> Result<String, String> {
+    db.save_schedule_course(course)
+}
+
+#[tauri::command]
+fn delete_schedule_course(db: State<'_, AppDb>, id: String) -> Result<(), String> {
+    db.delete_schedule_course(&id)
+}
+
+#[tauri::command]
 fn export_latest_schedule_json(db: State<'_, AppDb>) -> Result<String, String> {
     db.export_latest_json()
 }
@@ -118,6 +128,8 @@ pub fn run() {
             import_schedule_text,
             commit_import_bundle,
             list_schedule_courses,
+            save_schedule_course,
+            delete_schedule_course,
             schedule_view::get_schedule_snapshot,
             export_latest_schedule_json,
             export_latest_schedule_ics,
