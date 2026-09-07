@@ -16,6 +16,7 @@
   let runtimeCourses: Course[] = [];
   let liveData = false;
   let runtimeReady = false;
+  let midnightTimer: ReturnType<typeof setTimeout> | null = null;
 
   const nav = [
     { id: 'today' as PageId, label: '今日', icon: CalendarDays },
@@ -90,12 +91,31 @@
     void refreshWidgetSnapshot();
   }
 
-  function onDataChanged() { loadRuntimeData(); }
+  function scheduleMidnightRefresh() {
+    if (midnightTimer) clearTimeout(midnightTimer);
+    const now = new Date();
+    const nextMidnight = new Date(now);
+    nextMidnight.setHours(24, 0, 5, 0);
+    midnightTimer = setTimeout(() => {
+      void loadRuntimeData();
+      scheduleMidnightRefresh();
+    }, Math.max(1_000, nextMidnight.getTime() - now.getTime()));
+  }
+
+  function onDataChanged() { void loadRuntimeData(); }
+  function onVisibilityChange() { if (document.visibilityState === 'visible') void loadRuntimeData(); }
+
   onMount(() => {
-    loadRuntimeData();
+    void loadRuntimeData();
+    scheduleMidnightRefresh();
     window.addEventListener('luma-data-changed', onDataChanged);
+    document.addEventListener('visibilitychange', onVisibilityChange);
   });
-  onDestroy(() => window.removeEventListener('luma-data-changed', onDataChanged));
+  onDestroy(() => {
+    window.removeEventListener('luma-data-changed', onDataChanged);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    if (midnightTimer) clearTimeout(midnightTimer);
+  });
 
   $: cssVars = `--glass-blur:${glass.blur}px;--glass-opacity:${glass.opacity / 100};--glass-sat:${glass.saturation}%;--glass-highlight:${glass.highlight / 100};--glass-refraction:${glass.refraction / 100};--glass-noise:${glass.noise / 100}`;
 </script>
