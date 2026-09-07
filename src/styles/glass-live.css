@@ -28,6 +28,11 @@
   opacity: calc(.20 + var(--glass-refraction) * .80);
 }
 
+.sliders input[type="range"] {
+  touch-action: none;
+  accent-color: #5b56d6;
+}
+
 @media (max-width: 760px) {
   .mobile-nav,
   .apple-search,
