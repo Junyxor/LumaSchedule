@@ -1,22 +1,26 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-
-const host = process.env.TAURI_DEV_HOST;
+import { fileURLToPath, URL } from 'node:url';
 
 export default defineConfig({
   plugins: [svelte()],
   clearScreen: false,
+  resolve: {
+    alias: {
+      '@tauri-apps/plugin-dialog': fileURLToPath(new URL('./src/lib/shims/dialog.ts', import.meta.url))
+    }
+  },
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
-    hmr: host ? { protocol: 'ws', host, port: 1421 } : undefined,
-    watch: { ignored: ['**/src-tauri/**'] }
+    host: false
   },
-  envPrefix: ['VITE_', 'TAURI_ENV_*'],
+  envPrefix: ['VITE_'],
   build: {
-    target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome105' : 'safari13',
-    minify: !process.env.TAURI_ENV_DEBUG,
-    sourcemap: !!process.env.TAURI_ENV_DEBUG
+    // Android 8+ WebView is Chromium-based; keep the output modern and compact.
+    target: 'chrome100',
+    minify: 'esbuild',
+    sourcemap: false,
+    cssCodeSplit: true
   }
 });
