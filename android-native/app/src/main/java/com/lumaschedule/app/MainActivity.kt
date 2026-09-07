@@ -33,6 +33,9 @@ class MainActivity : Activity() {
     private val launchStarted = SystemClock.elapsedRealtime()
 
     @Volatile private var notificationLatch: CountDownLatch? = null
+    private val pickerLock = Any()
+    @Volatile private var pickerLatch: CountDownLatch? = null
+    @Volatile private var pickerResult: Uri? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -117,7 +120,14 @@ class MainActivity : Activity() {
                     }
                     WebResourceResponse(mimeFor(path), encodingFor(path), 200, "OK", headers, stream)
                 }.getOrElse {
-                    WebResourceResponse("text/plain", "utf-8", 404, "Not Found", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream(ByteArray(0)))
+                    WebResourceResponse(
+                        "text/plain",
+                        "utf-8",
+                        404,
+                        "Not Found",
+                        mapOf("Cache-Control" to "no-store"),
+                        ByteArrayInputStream(ByteArray(0))
+                    )
                 }
             }
 
@@ -150,7 +160,12 @@ class MainActivity : Activity() {
     }
 
     private fun blockedResponse() = WebResourceResponse(
-        "text/plain", "utf-8", 403, "Blocked by LumaSchedule", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream(ByteArray(0))
+        "text/plain",
+        "utf-8",
+        403,
+        "Blocked by LumaSchedule",
+        mapOf("Cache-Control" to "no-store"),
+        ByteArrayInputStream(ByteArray(0))
     )
 
     fun ensureNotificationPermissionBlocking(): Boolean {
@@ -160,14 +175,60 @@ class MainActivity : Activity() {
             if (notificationLatch != null) return false
             val latch = CountDownLatch(1)
             notificationLatch = latch
-            runOnUiThread { requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS) }
+            runOnUiThread {
+                requestPermissions(
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    REQUEST_NOTIFICATIONS
+                )
+            }
             latch.await(30, TimeUnit.SECONDS)
             notificationLatch = null
         }
         return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+    fun createDocumentBlocking(mimeType: String, suggestedName: String): Uri? = runPickerBlocking(
+        Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mimeType
+            putExtra(Intent.EXTRA_TITLE, suggestedName)
+        }
+    )
+
+    fun openDocumentBlocking(mimeTypes: Array<String>): Uri? = runPickerBlocking(
+        Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = if (mimeTypes.size == 1) mimeTypes[0] else "*/*"
+            if (mimeTypes.size > 1) putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+        }
+    )
+
+    private fun runPickerBlocking(intent: Intent): Uri? = synchronized(pickerLock) {
+        val latch = CountDownLatch(1)
+        pickerResult = null
+        pickerLatch = latch
+        runOnUiThread {
+            runCatching { startActivityForResult(intent, REQUEST_DOCUMENT) }
+                .onFailure { latch.countDown() }
+        }
+        latch.await(5, TimeUnit.MINUTES)
+        pickerLatch = null
+        pickerResult
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_DOCUMENT) {
+            pickerResult = if (resultCode == RESULT_OK) data?.data else null
+            pickerLatch?.countDown()
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_NOTIFICATIONS) notificationLatch?.countDown()
     }
@@ -178,6 +239,8 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        pickerLatch?.countDown()
+        notificationLatch?.countDown()
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface("LumaNative")
             webView.stopLoading()
@@ -192,5 +255,6 @@ class MainActivity : Activity() {
         private const val APP_HOST = "app.luma.local"
         private const val APP_URL = "https://$APP_HOST/index.html"
         private const val REQUEST_NOTIFICATIONS = 4017
+        private const val REQUEST_DOCUMENT = 4018
     }
 }
