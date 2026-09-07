@@ -1,0 +1,111 @@
+/*
+ * Live Liquid Glass material overrides.
+ * Imported after the mobile visual layer so user appearance controls always win.
+ */
+.glass-panel {
+  background:
+    linear-gradient(
+      160deg,
+      rgba(255,255,255,calc(var(--glass-opacity) + .18)),
+      rgba(248,248,253,calc(var(--glass-opacity) - .10))
+    );
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  border-color: rgba(255,255,255,calc(.28 + var(--glass-highlight) * .62));
+  box-shadow:
+    0 14px 42px rgba(42,44,66,.08),
+    inset 0 1px 0 rgba(255,255,255,calc(.30 + var(--glass-highlight) * .62)),
+    inset 0 -1px 0 rgba(70,72,94,.04);
+}
+
+.refract::after {
+  background: linear-gradient(
+    105deg,
+    transparent 12%,
+    rgba(255,255,255,calc(var(--glass-refraction) * .48)) 50%,
+    transparent 88%
+  );
+  opacity: calc(.20 + var(--glass-refraction) * .80);
+}
+
+@media (max-width: 760px) {
+  .mobile-nav,
+  .apple-search,
+  .import-toolbar,
+  .adapter-browser,
+  .next-card,
+  .apple-hero {
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  }
+
+  .mobile-nav {
+    background:
+      linear-gradient(
+        180deg,
+        rgba(255,255,255,calc(var(--glass-opacity) + .16)),
+        rgba(244,244,250,calc(var(--glass-opacity) - .14))
+      );
+    border-color: rgba(255,255,255,calc(.32 + var(--glass-highlight) * .60));
+    box-shadow:
+      0 16px 40px rgba(38,41,62,calc(.08 + var(--glass-refraction) * .10)),
+      inset 0 1px 0 rgba(255,255,255,calc(.28 + var(--glass-highlight) * .66)),
+      inset 0 -1px 0 rgba(70,72,92,.05);
+  }
+  .mobile-nav::before {
+    opacity: calc(.18 + var(--glass-refraction) * .82);
+  }
+
+  .apple-search,
+  .import-toolbar {
+    background:
+      linear-gradient(
+        180deg,
+        rgba(255,255,255,calc(var(--glass-opacity) + .12)),
+        rgba(247,247,252,calc(var(--glass-opacity) - .12))
+      );
+    border: 1px solid rgba(255,255,255,calc(.25 + var(--glass-highlight) * .58));
+    box-shadow:
+      0 8px 24px rgba(46,48,68,calc(.035 + var(--glass-refraction) * .07)),
+      inset 0 1px 0 rgba(255,255,255,calc(.24 + var(--glass-highlight) * .66));
+  }
+
+  .adapter-browser {
+    background:
+      linear-gradient(
+        180deg,
+        rgba(250,250,253,calc(var(--glass-opacity) + .12)),
+        rgba(242,242,248,calc(var(--glass-opacity) - .08))
+      );
+    border-color: rgba(255,255,255,calc(.28 + var(--glass-highlight) * .62));
+    box-shadow:
+      0 -16px 48px rgba(27,28,40,calc(.10 + var(--glass-refraction) * .10)),
+      inset 0 1px 0 rgba(255,255,255,calc(.30 + var(--glass-highlight) * .66));
+  }
+
+  .next-card,
+  .apple-hero {
+    background:
+      linear-gradient(
+        145deg,
+        rgba(255,255,255,calc(var(--glass-opacity) + .10)),
+        rgba(235,235,252,calc(var(--glass-opacity) - .14))
+      );
+    border-color: rgba(255,255,255,calc(.30 + var(--glass-highlight) * .60));
+    box-shadow:
+      0 16px 42px rgba(76,70,145,calc(.05 + var(--glass-refraction) * .08)),
+      inset 0 1px 0 rgba(255,255,255,calc(.30 + var(--glass-highlight) * .64));
+  }
+
+  .motion .mobile-nav,
+  .motion .adapter-browser,
+  .motion .apple-search,
+  .motion .import-toolbar {
+    transition:
+      background .20s ease,
+      border-color .20s ease,
+      box-shadow .20s ease,
+      backdrop-filter .20s ease,
+      -webkit-backdrop-filter .20s ease;
+  }
+}
