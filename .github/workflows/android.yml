@@ -45,6 +45,8 @@ jobs:
         run: node scripts/sync-shiguang-adapters.mjs
       - name: Validate bundled adapter contract
         run: node scripts/validate-shiguang-contract.mjs
+      - name: Smoke test GDUT adapter
+        run: node scripts/test-gdut-adapter.mjs
       - name: Build Svelte assets
         run: npm run build
       - name: Create ephemeral test signing key
@@ -106,6 +108,8 @@ jobs:
         run: node scripts/sync-shiguang-adapters.mjs
       - name: Validate bundled adapter contract
         run: node scripts/validate-shiguang-contract.mjs
+      - name: Smoke test GDUT adapter
+        run: node scripts/test-gdut-adapter.mjs
       - run: npm run build
       - name: Restore Android signing key
         env:
