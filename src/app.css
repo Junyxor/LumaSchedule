@@ -8,6 +8,7 @@
 @import './styles/mobile-runtime.css';
 @import './styles/glass-live.css';
 @import './styles/perf-mobile.css';
+@import './styles/import-mobile-fixes.css';
 
 html, body, #app, .app-shell {
   touch-action: pan-x pan-y;
