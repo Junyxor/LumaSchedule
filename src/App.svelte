@@ -6,12 +6,13 @@
   import ImportCenter from './lib/pages/ImportCenter.svelte';
   import Widgets from './lib/pages/Widgets.svelte';
   import Settings from './lib/pages/Settings.svelte';
-  import type { Course, GlassSettings, PageId } from './lib/types';
+  import type { Course, GlassSettings, PageId, ScheduleSnapshot } from './lib/types';
   import { courses as demoCourses, defaultGlass } from './lib/state';
-  import { getBootstrap, listScheduleCourses, publishWidgetSnapshot } from './lib/tauri';
+  import { getBootstrap, getScheduleSnapshot, publishWidgetSnapshot } from './lib/tauri';
 
   let page: PageId = 'today';
   let glass: GlassSettings = { ...defaultGlass };
+  let scheduleSnapshot: ScheduleSnapshot = { courses: [] };
   let runtimeCourses: Course[] = [];
   let liveData = false;
   let runtimeReady = false;
@@ -26,16 +27,19 @@
 
   async function loadRuntimeData() {
     try {
-      const [bootstrap, loaded] = await Promise.all([getBootstrap(), listScheduleCourses()]);
+      const [bootstrap, snapshot] = await Promise.all([getBootstrap(), getScheduleSnapshot()]);
       if (bootstrap.glassSettings) glass = { ...defaultGlass, ...bootstrap.glassSettings };
-      runtimeCourses = loaded;
+      scheduleSnapshot = snapshot;
+      runtimeCourses = snapshot.courses;
       liveData = bootstrap.dbReady;
     } catch {
       const saved = localStorage.getItem('luma.glass');
       if (saved) {
         try { glass = { ...defaultGlass, ...JSON.parse(saved) }; } catch {}
       }
-      runtimeCourses = import.meta.env.DEV ? demoCourses : [];
+      const fallback = import.meta.env.DEV ? demoCourses : [];
+      scheduleSnapshot = { courses: fallback };
+      runtimeCourses = fallback;
       liveData = false;
     } finally {
       runtimeReady = true;
@@ -48,7 +52,7 @@
         publishWidgetSnapshot({
           courseName: next.name,
           courseMeta: `${next.start || '待定'}–${next.end || '待定'} · ${next.room || '教室待定'}${next.teacher ? ` · ${next.teacher}` : ''}`,
-          countdown: '查看课表'
+          countdown: scheduleSnapshot.currentWeek ? `第 ${scheduleSnapshot.currentWeek} 周` : '查看课表'
         });
       }
     }
@@ -72,7 +76,17 @@
     <div class="sidebar-status"><span class="status-dot"></span><div><b>{runtimeReady ? (liveData ? '本地数据库' : '离线模式') : '正在载入'}</b><small>{liveData ? 'SQLite 已就绪' : '等待本地数据'}</small></div></div>
   </aside>
   <main class="main-stage">
-    {#if page === 'today'}<Today courses={runtimeCourses} />{:else if page === 'week'}<Week courses={runtimeCourses} />{:else if page === 'import'}<ImportCenter on:imported={loadRuntimeData} />{:else if page === 'widgets'}<Widgets />{:else}<Settings bind:glass />{/if}
+    {#if page === 'today'}
+      <Today courses={runtimeCourses} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} />
+    {:else if page === 'week'}
+      <Week courses={runtimeCourses} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} />
+    {:else if page === 'import'}
+      <ImportCenter on:imported={loadRuntimeData} />
+    {:else if page === 'widgets'}
+      <Widgets />
+    {:else}
+      <Settings bind:glass />
+    {/if}
   </main>
   <nav class="mobile-nav glass-panel" aria-label="主导航">{#each nav as item}<button class:active={page === item.id} on:click={() => (page = item.id)} aria-label={item.label}><svelte:component this={item.icon} size={20} strokeWidth={1.8} /><span>{item.label}</span></button>{/each}</nav>
 </div>
