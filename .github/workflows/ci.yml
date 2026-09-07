@@ -5,6 +5,11 @@ on:
     branches: [main, dev]
   pull_request:
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
   frontend:
     runs-on: ubuntu-latest
@@ -29,4 +34,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
       - run: cargo test -p schedule-core -p schedule-import -p schedule-adapter
-      - run: cargo check -p lumaschedule
+      - name: Check Tauri app
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set +e
+          cargo check -p lumaschedule 2>&1 | tee /tmp/luma-cargo-check.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ] && [ "${{ github.event_name }}" = "pull_request" ]; then
+            {
+              echo '### `cargo check -p lumaschedule` diagnostics'
+              echo
+              echo '```text'
+              tail -n 160 /tmp/luma-cargo-check.log
+              echo '```'
+            } > /tmp/luma-cargo-comment.md
+            gh pr comment "$PR_NUMBER" --body-file /tmp/luma-cargo-comment.md || true
+          fi
+          exit "$status"
