@@ -43,6 +43,8 @@ android {
         getByName("main") {
             // Vite output is packaged directly; no second copy of the UI is generated.
             assets.srcDir("../../dist")
+            // Reuse the already-reviewed RemoteViews/XML resources during migration.
+            res.srcDir("../../native/android/res")
         }
     }
 
