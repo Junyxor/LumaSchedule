@@ -7,6 +7,7 @@ commands.allow = [
   "import_schedule_text",
   "commit_import_bundle",
   "list_schedule_courses",
+  "get_schedule_snapshot",
   "export_latest_schedule_json",
   "export_latest_schedule_ics",
   "export_full_backup",
