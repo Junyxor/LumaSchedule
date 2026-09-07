@@ -7,17 +7,17 @@ members = [
   "src-tauri"
 ]
 
-# Keep test/dev binaries useful but do not ship hundreds of MB of Rust debug
-# symbols inside Android APKs. Backtraces still retain symbol names.
+# Keep local/debug builds usable without shipping huge DWARF sections in test APKs.
 [profile.dev]
 opt-level = 1
 debug = 0
 strip = "debuginfo"
 
-# LumaSchedule is a small utility app: prefer compact release binaries.
+# LumaSchedule is a small utility app. Optimize shipped Rust code for minimum size.
 [profile.release]
-opt-level = "s"
+opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
 strip = "symbols"
+incremental = false
