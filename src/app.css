@@ -4,3 +4,8 @@
 @import './styles/part4.css';
 @import './styles/part5.css';
 @import './styles/part6.css';
+
+html, body, #app, .app-shell {
+  touch-action: pan-x pan-y;
+  overscroll-behavior: none;
+}
