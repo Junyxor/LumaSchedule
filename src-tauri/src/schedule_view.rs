@@ -9,6 +9,7 @@ use tauri::State;
 #[serde(rename_all = "camelCase")]
 pub struct ScheduleSnapshot {
     pub courses: Vec<CourseView>,
+    pub has_schedule: bool,
     pub term_name: Option<String>,
     pub term_start: Option<String>,
     pub week_count: Option<u8>,
@@ -51,6 +52,7 @@ pub fn get_schedule_snapshot(db: State<'_, AppDb>) -> Result<ScheduleSnapshot, S
     let Some((term_name, term_start, week_count_raw, sections_json)) = info else {
         return Ok(ScheduleSnapshot {
             courses,
+            has_schedule: false,
             term_name: None,
             term_start: None,
             week_count: None,
@@ -95,6 +97,7 @@ pub fn get_schedule_snapshot(db: State<'_, AppDb>) -> Result<ScheduleSnapshot, S
 
     Ok(ScheduleSnapshot {
         courses,
+        has_schedule: true,
         term_name: display_term_name,
         term_start: (!term_start.trim().is_empty()).then_some(term_start),
         week_count: Some(week_count),
