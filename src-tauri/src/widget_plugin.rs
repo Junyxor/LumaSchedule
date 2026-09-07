@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::marker::PhantomData;
 use tauri::{
     plugin::{Builder, PluginHandle, TauriPlugin},
@@ -46,6 +46,13 @@ pub struct NativeShiguangResultRequest {
     pub session_id: String,
 }
 
+fn nullable_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeShiguangResult {
@@ -54,8 +61,10 @@ pub struct NativeShiguangResult {
     pub courses_json: Option<String>,
     pub time_slots_json: Option<String>,
     pub config_json: Option<String>,
-    pub adapter_name: Option<String>,
-    pub school_name: Option<String>,
+    #[serde(default, deserialize_with = "nullable_string")]
+    pub adapter_name: String,
+    #[serde(default, deserialize_with = "nullable_string")]
+    pub school_name: String,
 }
 
 #[derive(Debug, Deserialize)]
