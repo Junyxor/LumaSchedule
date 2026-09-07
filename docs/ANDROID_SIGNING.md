@@ -1,64 +1,63 @@
-# Android / Firebase secrets for v0.1
+# Android signing for LumaSchedule
 
-For the first working LumaSchedule build, keep the secret setup deliberately small. Create these under **Settings -> Secrets and variables -> Actions -> Repository secrets**.
+LumaSchedule 的 Native Android workflow 只需要 Android 签名密钥；当前主线不依赖 Tauri signing、NDK 或 Firebase SDK。
 
-## Required only for signed Release APK/AAB
+在 GitHub 仓库的 **Settings -> Secrets and variables -> Actions -> Repository secrets** 中配置正式发布所需的四个 Secret：
 
-- `ANDROID_KEYSTORE_BASE64` - Base64 of the Android Studio / `keytool` `.jks` or `.keystore` file.
-- `ANDROID_KEY_ALIAS` - alias of the signing key.
-- `ANDROID_KEY_PASSWORD` - password of the signing key alias.
-- `ANDROID_STORE_PASSWORD` - password of the keystore.
+- `ANDROID_KEYSTORE_BASE64` - Upload Key `.jks` / `.keystore` 文件的 Base64。
+- `ANDROID_KEY_ALIAS` - key alias。
+- `ANDROID_KEY_PASSWORD` - key password。
+- `ANDROID_STORE_PASSWORD` - keystore password。
 
-The Release job validates all four values before Gradle signing begins. The decoded keystore is written only to `$RUNNER_TEMP` and is never committed.
+Tag / 手动 Release job 会在 Gradle 开始签名前检查四项 Secret。解码后的 keystore 只写到 GitHub Runner 的 `$RUNNER_TEMP`，不会提交到仓库。
 
-PowerShell helper:
+## Base64 helper
 
-```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\to\lumaschedule-release.jks")) | Set-Clipboard
-```
-
-Linux:
-
-```bash
-base64 -w 0 ./lumaschedule-release.jks
-```
-
-macOS:
-
-```bash
-base64 -i ./lumaschedule-release.jks | tr -d '\n'
-```
-
-## Optional for v0.1 Firebase Android configuration
-
-- `FIREBASE_GOOGLE_SERVICES_JSON_BASE64` - Base64 of the complete Firebase `google-services.json` file.
-
-This is optional for the first Debug build. If it is present, GitHub Actions restores it to the generated Android app directory. If it is absent, the build continues without Firebase configuration.
-
-`google-services.json` is an Android client configuration, not a Firebase service-account private key. LumaSchedule still keeps it out of the public repository. Never put a Firebase Admin SDK / service-account private key into the APK; those belong on a trusted server only.
-
-PowerShell helper:
+PowerShell：
 
 ```powershell
-[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\to\google-services.json")) | Set-Clipboard
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\to\lumaschedule-upload.jks")) | Set-Clipboard
 ```
 
-Linux:
+Linux：
 
 ```bash
-base64 -w 0 ./google-services.json
+base64 -w 0 ./lumaschedule-upload.jks
 ```
 
-macOS:
+macOS：
 
 ```bash
-base64 -i ./google-services.json | tr -d '\n'
+base64 -i ./lumaschedule-upload.jks | tr -d '\n'
 ```
 
-## v0.1 build behavior
+## Current workflow behavior
 
-- Push / PR: unsigned Debug APK. Firebase config is optional.
-- Tag `v*` or manual workflow dispatch with `release=true`: signed Release APK + AAB. All four Android signing secrets are mandatory.
-- The repository ignores `*.jks`, `*.keystore`, `keystore.properties`, `google-services.json`, and Apple `GoogleService-Info.plist` files.
+- 普通 PR：构建 **R8/Resource Shrinking 的 Release APK**，但使用 GitHub Actions 临时生成的测试 key 签名，方便直接真机安装；这个 key 不用于正式发行。
+- Tag `v*` 或 `workflow_dispatch release=true`：使用四项 Repository Secrets 构建正式签名的 Release APK + AAB。
+- Native Android build 直接运行 Gradle，不需要 Rust/Cargo/Tauri CLI/Android NDK。
+- 仓库忽略 `*.jks`、`*.keystore`、`keystore.properties` 和本地 credential 文件。
 
-Keep the original Android keystore backed up offline in at least two safe locations. Losing it can prevent future updates to builds distributed outside Google Play App Signing.
+## Recommended release key model
+
+正式上线时推荐启用 **Google Play App Signing**：
+
+1. Google Play 保管最终 App Signing Key；
+2. 开发者自己保管 Upload Key；
+3. GitHub Actions Secrets 只放 Upload Key；
+4. 本地至少保留两份离线备份；
+5. 不在 Issue、PR、聊天记录或源码中发送 key/password。
+
+直接分发 APK 时，用户后续升级要求签名一致，因此用于官网/GitHub Release 的正式签名 key 同样必须长期保存。
+
+## Firebase
+
+当前 v0.1 Native 主线**没有接入 Firebase SDK**，也不需要 `google-services.json` 才能构建或运行核心功能。之前测试阶段使用过的 Firebase 配置恢复逻辑已经从 Native Android workflow 移除。
+
+如果以后确实加入 Firebase Crashlytics、FCM 等功能，应单独评估：
+
+- 是否符合 Local-first / 默认无遥测原则；
+- SDK 对 APK、启动时间和隐私的成本；
+- 客户端配置与服务端私钥的边界。
+
+绝不要把 Firebase Admin SDK / service-account 私钥放进 APK。
