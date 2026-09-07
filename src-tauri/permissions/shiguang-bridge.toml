@@ -1,4 +1,0 @@
-[[permission]]
-identifier = "shiguang-bridge"
-description = "Allows a sandboxed Shiguang compatibility webview to stage course data into its active import session. The command rejects unknown session tokens and has no filesystem or shell access."
-commands.allow = ["shiguang_bridge"]
