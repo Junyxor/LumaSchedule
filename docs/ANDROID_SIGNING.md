@@ -1,15 +1,15 @@
-# Android signing in GitHub Actions
+# Android / Firebase secrets for v0.1
 
-LumaSchedule does not commit signing material. Release APK/AAB builds restore an Android Studio / `keytool` keystore only inside the GitHub-hosted runner.
+For the first working LumaSchedule build, keep the secret setup deliberately small. Create these under **Settings -> Secrets and variables -> Actions -> Repository secrets**.
 
-## Repository secrets
+## Required only for signed Release APK/AAB
 
-Create these under **Settings → Secrets and variables → Actions → Repository secrets**:
+- `ANDROID_KEYSTORE_BASE64` - Base64 of the Android Studio / `keytool` `.jks` or `.keystore` file.
+- `ANDROID_KEY_ALIAS` - alias of the signing key.
+- `ANDROID_KEY_PASSWORD` - password of the signing key alias.
+- `ANDROID_STORE_PASSWORD` - password of the keystore.
 
-- `ANDROID_KEYSTORE_BASE64` — Base64 of the `.jks` / `.keystore` file.
-- `ANDROID_KEY_ALIAS` — key alias selected in Android Studio.
-- `ANDROID_KEY_PASSWORD` — password for the key alias.
-- `ANDROID_STORE_PASSWORD` — password for the keystore.
+The Release job validates all four values before Gradle signing begins. The decoded keystore is written only to `$RUNNER_TEMP` and is never committed.
 
 PowerShell helper:
 
@@ -29,11 +29,36 @@ macOS:
 base64 -i ./lumaschedule-release.jks | tr -d '\n'
 ```
 
-The `Android` workflow generates `src-tauri/gen/android/keystore.properties` at runtime, patches the generated Gradle release signing config, then creates both APK and AAB artifacts. The keystore file is written to `$RUNNER_TEMP`, never to the repository.
+## Optional for v0.1 Firebase Android configuration
 
-## Build behavior
+- `FIREBASE_GOOGLE_SERVICES_JSON_BASE64` - Base64 of the complete Firebase `google-services.json` file.
 
-- Push / PR: unsigned **debug APK** for quick device testing.
-- Tag `v*` or manual workflow dispatch: **signed release APK + AAB** and fails early if signing secrets are missing.
+This is optional for the first Debug build. If it is present, GitHub Actions restores it to the generated Android app directory. If it is absent, the build continues without Firebase configuration.
 
-Keep the original keystore backed up offline. Losing it can prevent future updates to builds distributed outside Play App Signing.
+`google-services.json` is an Android client configuration, not a Firebase service-account private key. LumaSchedule still keeps it out of the public repository. Never put a Firebase Admin SDK / service-account private key into the APK; those belong on a trusted server only.
+
+PowerShell helper:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\to\google-services.json")) | Set-Clipboard
+```
+
+Linux:
+
+```bash
+base64 -w 0 ./google-services.json
+```
+
+macOS:
+
+```bash
+base64 -i ./google-services.json | tr -d '\n'
+```
+
+## v0.1 build behavior
+
+- Push / PR: unsigned Debug APK. Firebase config is optional.
+- Tag `v*` or manual workflow dispatch with `release=true`: signed Release APK + AAB. All four Android signing secrets are mandatory.
+- The repository ignores `*.jks`, `*.keystore`, `keystore.properties`, `google-services.json`, and Apple `GoogleService-Info.plist` files.
+
+Keep the original Android keystore backed up offline in at least two safe locations. Losing it can prevent future updates to builds distributed outside Google Play App Signing.
