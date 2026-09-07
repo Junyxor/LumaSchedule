@@ -2,11 +2,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
-import type { BackupSummary, Course, GlassSettings, ImportBundle, ScheduleSnapshot, ShiguangAdapter, ShiguangImportStart, ShiguangSchool, ShiguangSessionSnapshot, WebDavCredentials, WebDavProfile, WebDavResult } from './types';
+import type { BackupSummary, Course, CourseMutation, GlassSettings, ImportBundle, ScheduleSnapshot, ShiguangAdapter, ShiguangImportStart, ShiguangSchool, ShiguangSessionSnapshot, WebDavCredentials, WebDavProfile, WebDavResult } from './types';
 
 export async function getBootstrap() { return invoke<{ appVersion: string; glassSettings?: GlassSettings | null; dbReady: boolean }>('get_bootstrap'); }
 export async function listScheduleCourses() { return invoke<Course[]>('list_schedule_courses'); }
 export async function getScheduleSnapshot() { return invoke<ScheduleSnapshot>('get_schedule_snapshot'); }
+export async function saveScheduleCourse(course: CourseMutation) { return invoke<string>('save_schedule_course', { course }); }
+export async function deleteScheduleCourse(id: string) { return invoke<void>('delete_schedule_course', { id }); }
 export async function saveGlassSettings(settings: GlassSettings) { try { return await invoke('save_glass_settings', { settings }); } catch { localStorage.setItem('luma.glass', JSON.stringify(settings)); } }
 export async function importText(format: string, payload: string) { return invoke<ImportBundle>('import_schedule_text', { format, payload }); }
 export async function commitImport(bundle: ImportBundle) { return invoke<{ termId: string; scheduleId: string; courseCount: number; meetingCount: number }>('commit_import_bundle', { bundle }); }
