@@ -19,7 +19,7 @@ export default defineConfig({
   build: {
     // Android 8+ WebView is Chromium-based; keep the output modern and compact.
     target: 'chrome100',
-    minify: 'esbuild',
+    minify: 'oxc',
     sourcemap: false,
     cssCodeSplit: true
   }
