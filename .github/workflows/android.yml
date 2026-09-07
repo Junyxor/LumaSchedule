@@ -49,6 +49,17 @@ jobs:
         run: node scripts/sync-shiguang-adapters.mjs
       - run: npx tauri android init --ci --skip-targets-install
       - run: npx tauri icon assets/app-icon.svg
+      - name: Restore optional Firebase Android config
+        env:
+          FIREBASE_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}
+        shell: bash
+        run: |
+          if [ -z "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "Firebase Android config not configured; continuing without google-services.json."
+            exit 0
+          fi
+          printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > src-tauri/gen/android/app/google-services.json
+          test -s src-tauri/gen/android/app/google-services.json || (echo "::error::Decoded google-services.json is empty" && exit 1)
       - run: node scripts/prepare-android-ci.mjs
       - run: npx tauri android build --debug --apk --ci
       - uses: actions/upload-artifact@v4
@@ -92,15 +103,31 @@ jobs:
         run: node scripts/sync-shiguang-adapters.mjs
       - run: npx tauri android init --ci --skip-targets-install
       - run: npx tauri icon assets/app-icon.svg
+      - name: Restore optional Firebase Android config
+        env:
+          FIREBASE_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}
+        shell: bash
+        run: |
+          if [ -z "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" ]; then
+            echo "Firebase Android config not configured; continuing without google-services.json."
+            exit 0
+          fi
+          printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > src-tauri/gen/android/app/google-services.json
+          test -s src-tauri/gen/android/app/google-services.json || (echo "::error::Decoded google-services.json is empty" && exit 1)
       - name: Restore Android signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        shell: bash
         run: |
-          test -n "$KEYSTORE_BASE64" || (echo "ANDROID_KEYSTORE_BASE64 is missing" && exit 1)
-          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/lumaschedule-release.jks"
+          test -n "$KEYSTORE_BASE64" || (echo "::error::ANDROID_KEYSTORE_BASE64 is missing" && exit 1)
+          test -n "$KEY_ALIAS" || (echo "::error::ANDROID_KEY_ALIAS is missing" && exit 1)
+          test -n "$KEY_PASSWORD" || (echo "::error::ANDROID_KEY_PASSWORD is missing" && exit 1)
+          test -n "$STORE_PASSWORD" || (echo "::error::ANDROID_STORE_PASSWORD is missing" && exit 1)
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/lumaschedule-release.jks"
+          test -s "$RUNNER_TEMP/lumaschedule-release.jks" || (echo "::error::Decoded Android keystore is empty" && exit 1)
           cat > src-tauri/gen/android/keystore.properties <<EOF2
           keyAlias=$KEY_ALIAS
           keyPassword=$KEY_PASSWORD
