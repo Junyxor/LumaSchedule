@@ -1,12 +1,14 @@
 <script lang="ts">
   import { Bell, Cloud, Database, Download, Github, Palette, RefreshCw, Shield, Upload } from 'lucide-svelte';
   import { confirm } from '@tauri-apps/plugin-dialog';
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import type { GlassSettings, WebDavCredentials, WebDavProfile } from '../types';
   import { getWebDavProfile, restoreFullBackupFromFile, restoreWebDavBackup, saveFullBackup, saveGlassSettings, saveLatestScheduleIcs, saveLatestScheduleJson, saveWebDavProfile, scheduleTestReminder, testNotification, testWebDav, uploadWebDavBackup } from '../tauri';
 
   export let glass: GlassSettings;
-  const apply = () => saveGlassSettings(glass);
+  type NumericGlassKey = Exclude<keyof GlassSettings, 'motion'>;
+
+  let glassSaveTimer: ReturnType<typeof setTimeout> | null = null;
   let webdav: WebDavProfile = { baseUrl: '', username: '', remotePath: 'LumaSchedule/lumaschedule-latest.luma.json' };
   let webdavPassword = '';
   let webdavBusy = false;
@@ -15,6 +17,27 @@
   let dataBusy = false;
 
   onMount(async () => { try { webdav = await getWebDavProfile(); } catch {} });
+  onDestroy(() => {
+    if (glassSaveTimer) clearTimeout(glassSaveTimer);
+    void saveGlassSettings(glass);
+  });
+
+  function queueGlassSave() {
+    localStorage.setItem('luma.glass', JSON.stringify(glass));
+    if (glassSaveTimer) clearTimeout(glassSaveTimer);
+    glassSaveTimer = setTimeout(() => void saveGlassSettings(glass), 180);
+  }
+
+  function updateGlass(key: NumericGlassKey, value: number) {
+    glass = { ...glass, [key]: value };
+    queueGlassSave();
+  }
+
+  function toggleMotion() {
+    glass = { ...glass, motion: !glass.motion };
+    queueGlassSave();
+  }
+
   function credentials(): WebDavCredentials { return { ...webdav, password: webdavPassword }; }
 
   async function withWebDav(action: 'test' | 'upload' | 'restore') {
@@ -64,16 +87,26 @@
   <header class="topbar"><div><span class="eyebrow">设置</span><h1>设置</h1><p>外观、提醒、备份与隐私。</p></div></header>
   <div class="settings-layout"><div class="settings-main">
     <article class="settings-card glass-panel">
-      <div class="settings-title"><span><Palette size={19} /></span><div><b>Liquid Glass</b><p>玻璃只用于导航、搜索和浮层；内容区保持清晰。</p></div></div>
-      <div class="sliders">
-        <label><span>模糊 <b>{glass.blur}px</b></span><input type="range" min="0" max="48" bind:value={glass.blur} on:change={apply} /></label>
-        <label><span>透明度 <b>{glass.opacity}%</b></span><input type="range" min="35" max="92" bind:value={glass.opacity} on:change={apply} /></label>
-        <label><span>饱和度 <b>{glass.saturation}%</b></span><input type="range" min="90" max="190" bind:value={glass.saturation} on:change={apply} /></label>
-        <label><span>高光 <b>{glass.highlight}%</b></span><input type="range" min="0" max="100" bind:value={glass.highlight} on:change={apply} /></label>
-        <label><span>折射感 <b>{glass.refraction}%</b></span><input type="range" min="0" max="100" bind:value={glass.refraction} on:change={apply} /></label>
-        <label><span>噪点 <b>{glass.noise}%</b></span><input type="range" min="0" max="8" bind:value={glass.noise} on:change={apply} /></label>
+      <div class="settings-title"><span><Palette size={19} /></span><div><b>Liquid Glass</b><p>滑动时实时更新导航、搜索、浮层和课程主卡。</p></div></div>
+
+      <div class="glass-preview-stage" aria-label="Liquid Glass 实时预览">
+        <i class="preview-orb preview-orb-a"></i><i class="preview-orb preview-orb-b"></i>
+        <div class="glass-preview-card glass-panel refract">
+          <span>实时预览</span>
+          <b>Liquid Glass</b>
+          <small>模糊、透明度、饱和度、高光、折射和噪点会立即反映在这里。</small>
+        </div>
       </div>
-      <button class="toggle-row" on:click={() => { glass.motion = !glass.motion; apply(); }}><span>动态玻璃</span><i class:on={glass.motion}></i></button>
+
+      <div class="sliders">
+        <label><span>模糊 <b>{glass.blur}px</b></span><input type="range" min="0" max="48" value={glass.blur} on:input={(event) => updateGlass('blur', Number(event.currentTarget.value))} /></label>
+        <label><span>透明度 <b>{glass.opacity}%</b></span><input type="range" min="25" max="95" value={glass.opacity} on:input={(event) => updateGlass('opacity', Number(event.currentTarget.value))} /></label>
+        <label><span>饱和度 <b>{glass.saturation}%</b></span><input type="range" min="70" max="210" value={glass.saturation} on:input={(event) => updateGlass('saturation', Number(event.currentTarget.value))} /></label>
+        <label><span>高光 <b>{glass.highlight}%</b></span><input type="range" min="0" max="100" value={glass.highlight} on:input={(event) => updateGlass('highlight', Number(event.currentTarget.value))} /></label>
+        <label><span>折射感 <b>{glass.refraction}%</b></span><input type="range" min="0" max="100" value={glass.refraction} on:input={(event) => updateGlass('refraction', Number(event.currentTarget.value))} /></label>
+        <label><span>噪点 <b>{glass.noise}%</b></span><input type="range" min="0" max="8" value={glass.noise} on:input={(event) => updateGlass('noise', Number(event.currentTarget.value))} /></label>
+      </div>
+      <button class="toggle-row" on:click={toggleMotion}><span>动态玻璃</span><i class:on={glass.motion}></i></button>
     </article>
 
     <article class="settings-card glass-panel">
@@ -113,3 +146,34 @@
     <article class="about-card glass-panel"><Github size={19} /><div><b>100% 开源 · 无广告</b><span>Apache-2.0 · Core powered by Rust</span></div></article>
   </aside></div>
 </section>
+
+<style>
+  .glass-preview-stage {
+    position: relative;
+    min-height: 150px;
+    margin: 16px 0 18px;
+    border-radius: 24px;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(135deg, #d9e9ff, #eee6ff 48%, #ffe7ef);
+    isolation: isolate;
+  }
+  .preview-orb { position: absolute; border-radius: 999px; filter: blur(4px); opacity: .78; }
+  .preview-orb-a { width: 118px; height: 118px; left: -18px; top: -22px; background: #8ecbff; }
+  .preview-orb-b { width: 135px; height: 135px; right: -18px; bottom: -42px; background: #ff9fc6; }
+  .glass-preview-card {
+    width: min(82%, 330px);
+    min-height: 96px;
+    border-radius: 24px;
+    padding: 18px 20px;
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .glass-preview-card span { font-size: 11px; opacity: .62; }
+  .glass-preview-card b { font-size: 20px; margin: 3px 0 4px; }
+  .glass-preview-card small { font-size: 11px; line-height: 1.45; opacity: .66; }
+</style>
