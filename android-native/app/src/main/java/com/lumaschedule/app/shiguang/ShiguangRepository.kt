@@ -14,38 +14,24 @@ class ShiguangRepository(private val context: Context) {
     @Volatile private var schoolCache: List<School>? = null
 
     fun listSchools(query: String?): JSONArray {
-        val all = schoolCache ?: synchronized(this) {
-            schoolCache ?: loadSchools().also { schoolCache = it }
-        }
+        val all = schools()
         val needle = query.orEmpty().trim().lowercase()
         val filtered = if (needle.isBlank()) all else all.filter {
-            it.name.lowercase().contains(needle) || it.id.lowercase().contains(needle) || it.initial.lowercase().contains(needle)
+            it.name.lowercase().contains(needle) ||
+                it.id.lowercase().contains(needle) ||
+                it.initial.lowercase().contains(needle)
         }
-        return JSONArray(filtered.sortedWith(compareBy<School> { it.initial }.thenBy { it.name }).map { it.toJson() })
+        return JSONArray(
+            filtered
+                .sortedWith(compareBy<School> { it.initial }.thenBy { it.name })
+                .map { it.toJson() }
+        )
     }
 
     fun listAdapters(schoolId: String): JSONArray {
         val school = schools().firstOrNull { it.id.equals(schoolId, ignoreCase = true) }
             ?: error("拾光适配仓库中找不到学校：$schoolId")
-        val path = safeAssetPath("shiguang_warehouse/resources/${school.resourceFolder}/adapters.yaml")
-        val text = readAsset(path)
-        val items = parseYamlList(text, "adapters")
-        return JSONArray(items.mapNotNull { raw ->
-            val id = raw["adapter_id"].orEmpty()
-            if (id.isBlank()) return@mapNotNull null
-            Adapter(
-                schoolId = school.id,
-                schoolName = school.name,
-                resourceFolder = school.resourceFolder,
-                adapterId = id,
-                adapterName = raw["adapter_name"].orEmpty().ifBlank { id },
-                category = raw["category"].orEmpty(),
-                assetJsPath = raw["asset_js_path"].orEmpty(),
-                importUrl = raw["import_url"].orEmpty(),
-                maintainer = raw["maintainer"].orEmpty(),
-                description = raw["description"].orEmpty()
-            ).toJson()
-        })
+        return JSONArray(adapters(school).map { it.toJson() })
     }
 
     fun startImport(activity: Activity, schoolId: String, adapterId: String): JSONObject {
@@ -73,7 +59,7 @@ class ShiguangRepository(private val context: Context) {
             .putString(ShiguangImportActivity.key(sessionId, "source_sha256"), sha)
             .apply()
 
-        activity.startActivity(Intent(activity, ShiguangImportActivity::class.java).apply {
+        val intent = Intent(activity, ShiguangImportActivity::class.java).apply {
             putExtra(ShiguangImportActivity.EXTRA_SESSION_ID, sessionId)
             putExtra(ShiguangImportActivity.EXTRA_IMPORT_URL, adapter.importUrl)
             putExtra(ShiguangImportActivity.EXTRA_ADAPTER_SCRIPT, script)
@@ -81,7 +67,8 @@ class ShiguangRepository(private val context: Context) {
             putExtra(ShiguangImportActivity.EXTRA_ADAPTER_NAME, adapter.adapterName)
             putExtra(ShiguangImportActivity.EXTRA_SCHOOL_NAME, school.name)
             putExtra(ShiguangImportActivity.EXTRA_INSECURE_TRANSPORT, insecure)
-        })
+        }
+        activity.runOnUiThread { activity.startActivity(intent) }
 
         return JSONObject()
             .put("sessionId", sessionId)
@@ -148,22 +135,28 @@ class ShiguangRepository(private val context: Context) {
                 MutableCourse(name, teacher, location, day, startSection, endSection, startTime, endTime, linkedSetOf())
             }
             val weeks = item.optJSONArray("weeks")
-            if (weeks != null) for (j in 0 until weeks.length()) weeks.optInt(j).takeIf { it in 1..64 }?.let(target.weeks::add)
+            if (weeks != null) {
+                for (j in 0 until weeks.length()) {
+                    weeks.optInt(j).takeIf { it in 1..64 }?.let(target.weeks::add)
+                }
+            }
         }
 
         val courses = JSONArray()
         merged.values.forEach { item ->
             if (item.weeks.isEmpty()) (1..20).forEach(item.weeks::add)
-            courses.put(JSONObject()
-                .put("name", item.name)
-                .put("teacher", item.teacher.ifBlank { JSONObject.NULL })
-                .put("location", item.location.ifBlank { JSONObject.NULL })
-                .put("weekday", item.day)
-                .put("startSection", item.startSection)
-                .put("endSection", item.endSection)
-                .put("weeks", JSONArray(item.weeks.sorted()))
-                .put("startTime", item.startTime.ifBlank { JSONObject.NULL })
-                .put("endTime", item.endTime.ifBlank { JSONObject.NULL }))
+            courses.put(
+                JSONObject()
+                    .put("name", item.name)
+                    .put("teacher", item.teacher.ifBlank { JSONObject.NULL })
+                    .put("location", item.location.ifBlank { JSONObject.NULL })
+                    .put("weekday", item.day)
+                    .put("startSection", item.startSection)
+                    .put("endSection", item.endSection)
+                    .put("weeks", JSONArray(item.weeks.sorted()))
+                    .put("startTime", item.startTime.ifBlank { JSONObject.NULL })
+                    .put("endTime", item.endTime.ifBlank { JSONObject.NULL })
+            )
         }
 
         val config = configRaw?.let { runCatching { JSONObject(it) }.getOrNull() }
@@ -204,14 +197,24 @@ class ShiguangRepository(private val context: Context) {
         return parseYamlList(text, "adapters").mapNotNull { raw ->
             val id = raw["adapter_id"].orEmpty()
             if (id.isBlank()) null else Adapter(
-                school.id, school.name, school.resourceFolder, id,
-                raw["adapter_name"].orEmpty().ifBlank { id }, raw["category"].orEmpty(),
-                raw["asset_js_path"].orEmpty(), raw["import_url"].orEmpty(), raw["maintainer"].orEmpty(), raw["description"].orEmpty()
+                school.id,
+                school.name,
+                school.resourceFolder,
+                id,
+                raw["adapter_name"].orEmpty().ifBlank { id },
+                raw["category"].orEmpty(),
+                raw["asset_js_path"].orEmpty(),
+                raw["import_url"].orEmpty(),
+                raw["maintainer"].orEmpty(),
+                raw["description"].orEmpty()
             )
         }
     }
 
-    private fun readAsset(path: String): String = context.assets.open(safeAssetPath(path)).bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+    private fun readAsset(path: String): String = context.assets
+        .open(safeAssetPath(path))
+        .bufferedReader(StandardCharsets.UTF_8)
+        .use { it.readText() }
 
     private fun safeAssetPath(path: String): String {
         val normalized = path.replace('\\', '/').trimStart('/')
@@ -234,9 +237,9 @@ class ShiguangRepository(private val context: Context) {
             if (trimmed.startsWith("- ")) {
                 current?.takeIf { it.isNotEmpty() }?.let(result::add)
                 current = linkedMapOf()
-                parseYamlPair(trimmed.removePrefix("- "))?.let { (k, v) -> current[k] = v }
+                parseYamlPair(trimmed.removePrefix("- "))?.let { (key, value) -> current[key] = value }
             } else if (current != null) {
-                parseYamlPair(trimmed)?.let { (k, v) -> current[k] = v }
+                parseYamlPair(trimmed)?.let { (key, value) -> current[key] = value }
             }
         }
         current?.takeIf { it.isNotEmpty() }?.let(result::add)
@@ -247,9 +250,40 @@ class ShiguangRepository(private val context: Context) {
         val colon = line.indexOf(':')
         if (colon <= 0) return null
         val key = line.substring(0, colon).trim()
-        var value = line.substring(colon + 1).trim()
-        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith('\'') && value.endsWith('\''))) value = value.substring(1, value.length - 1)
+        var value = stripYamlComment(line.substring(colon + 1)).trim()
+        if (value.length >= 2) {
+            val first = value.first()
+            val last = value.last()
+            if ((first == '"' && last == '"') || (first == '\'' && last == '\'')) {
+                value = value.substring(1, value.length - 1)
+            }
+        }
         return key to value.replace("\\\"", "\"").replace("\\'", "'")
+    }
+
+    private fun stripYamlComment(raw: String): String {
+        var singleQuoted = false
+        var doubleQuoted = false
+        var escaped = false
+        for (index in raw.indices) {
+            val char = raw[index]
+            if (escaped) {
+                escaped = false
+                continue
+            }
+            if (char == '\\' && doubleQuoted) {
+                escaped = true
+                continue
+            }
+            when (char) {
+                '\'' -> if (!doubleQuoted) singleQuoted = !singleQuoted
+                '"' -> if (!singleQuoted) doubleQuoted = !doubleQuoted
+                '#' -> if (!singleQuoted && !doubleQuoted && (index == 0 || raw[index - 1].isWhitespace())) {
+                    return raw.substring(0, index)
+                }
+            }
+        }
+        return raw
     }
 
     private fun collectLoginHosts(importUrl: String): Set<String> {
@@ -278,7 +312,13 @@ class ShiguangRepository(private val context: Context) {
             if (depth > 4 || !seen.add(raw)) return
             val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return
             if (uri.scheme.equals("http", true)) insecure = true
-            runCatching { uri.queryParameterNames.forEach { name -> uri.getQueryParameters(name).forEach { value -> if (value.startsWith("http://") || value.startsWith("https://")) visit(value, depth + 1) } } }
+            runCatching {
+                uri.queryParameterNames.forEach { name ->
+                    uri.getQueryParameters(name).forEach { value ->
+                        if (value.startsWith("http://") || value.startsWith("https://")) visit(value, depth + 1)
+                    }
+                }
+            }
         }
         visit(importUrl, 0)
         return insecure
@@ -290,26 +330,47 @@ class ShiguangRepository(private val context: Context) {
     }
 
     private fun sha256(text: String): String = MessageDigest.getInstance("SHA-256")
-        .digest(text.toByteArray(StandardCharsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        .digest(text.toByteArray(StandardCharsets.UTF_8))
+        .joinToString("") { "%02x".format(it) }
 
     private data class School(val id: String, val name: String, val initial: String, val resourceFolder: String) {
         fun toJson() = JSONObject().put("id", id).put("name", name).put("initial", initial).put("resourceFolder", resourceFolder)
     }
 
     private data class Adapter(
-        val schoolId: String, val schoolName: String, val resourceFolder: String,
-        val adapterId: String, val adapterName: String, val category: String,
-        val assetJsPath: String, val importUrl: String, val maintainer: String, val description: String
+        val schoolId: String,
+        val schoolName: String,
+        val resourceFolder: String,
+        val adapterId: String,
+        val adapterName: String,
+        val category: String,
+        val assetJsPath: String,
+        val importUrl: String,
+        val maintainer: String,
+        val description: String
     ) {
         fun toJson() = JSONObject()
-            .put("schoolId", schoolId).put("schoolName", schoolName).put("resourceFolder", resourceFolder)
-            .put("adapterId", adapterId).put("adapterName", adapterName).put("category", category)
-            .put("assetJsPath", assetJsPath).put("importUrl", importUrl).put("maintainer", maintainer).put("description", description)
+            .put("schoolId", schoolId)
+            .put("schoolName", schoolName)
+            .put("resourceFolder", resourceFolder)
+            .put("adapterId", adapterId)
+            .put("adapterName", adapterName)
+            .put("category", category)
+            .put("assetJsPath", assetJsPath)
+            .put("importUrl", importUrl)
+            .put("maintainer", maintainer)
+            .put("description", description)
     }
 
     private data class MutableCourse(
-        val name: String, val teacher: String, val location: String, val day: Int,
-        val startSection: Int, val endSection: Int, val startTime: String, val endTime: String,
+        val name: String,
+        val teacher: String,
+        val location: String,
+        val day: Int,
+        val startSection: Int,
+        val endSection: Int,
+        val startTime: String,
+        val endTime: String,
         val weeks: LinkedHashSet<Int>
     )
 }
