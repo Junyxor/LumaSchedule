@@ -233,7 +233,7 @@ class ShiguangRepository(private val context: Context) {
                 if (trimmed == "$root:") inside = true
                 continue
             }
-            if (!rawLine.firstOrNull().isWhitespace() && !trimmed.startsWith('-')) break
+            if (rawLine.isNotEmpty() && !rawLine.first().isWhitespace() && !trimmed.startsWith('-')) break
             if (trimmed.startsWith("- ")) {
                 current?.takeIf { it.isNotEmpty() }?.let(result::add)
                 current = linkedMapOf()
