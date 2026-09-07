@@ -8,7 +8,7 @@
   import Settings from './lib/pages/Settings.svelte';
   import type { Course, GlassSettings, PageId, ScheduleSnapshot } from './lib/types';
   import { defaultGlass } from './lib/state';
-  import { getBootstrap, getScheduleSnapshot, publishWidgetSnapshot } from './lib/tauri';
+  import { getBootstrap, getScheduleSnapshot, publishWidgetSnapshot, syncCourseReminders } from './lib/tauri';
 
   let page: PageId = 'today';
   let glass: GlassSettings = { ...defaultGlass };
@@ -94,6 +94,7 @@
       runtimeReady = true;
     }
     void refreshWidgetSnapshot();
+    if (liveData) void syncCourseReminders().catch(() => undefined);
   }
 
   function scheduleMidnightRefresh() {
