@@ -5,6 +5,7 @@
   import type { Course } from '../types';
 
   export let courses: Course[];
+  export let hasSchedule = false;
   export let currentWeek: number | null | undefined = null;
   export let termName: string | null | undefined = null;
 
@@ -39,6 +40,8 @@
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 0;
     return Math.max(0, Math.min(100, ((nowMinutes - start) / (end - start)) * 100));
   })();
+  $: emptyTitle = hasSchedule ? '当前没有课程' : '还没有课表';
+  $: emptyMessage = hasSchedule ? '课表已经保存在本地；当前周可能暂无课程，或不在教学周内。' : '前往「导入」添加学校教务课表或课表文件。';
 </script>
 
 <section class="page page-today">
@@ -46,7 +49,7 @@
     <div>
       <span class="eyebrow">{dateLabel}</span>
       <h1>{greeting}</h1>
-      <p>{academicLabel ? `${academicLabel} · ` : ''}{remainingCourses.length ? `今天还有 ${remainingCourses.length} 个课程时段` : '今天没有剩余课程'}</p>
+      <p>{academicLabel ? `${academicLabel} · ` : ''}{remainingCourses.length ? `今天还有 ${remainingCourses.length} 个课程时段` : hasSchedule ? '今天没有剩余课程' : '等待导入课表'}</p>
     </div>
   </header>
 
@@ -63,7 +66,7 @@
   {:else}
     <article class="today-empty content-surface">
       <span><ShieldCheck size={22} /></span>
-      <div><h2>{courses.length ? '今天没有课程' : '还没有课表'}</h2><p>{courses.length ? '今天可以自由安排。' : '前往「导入」添加学校教务课表或课表文件。'}</p></div>
+      <div><h2>{todayCourses.length ? '今天的课程已结束' : emptyTitle}</h2><p>{todayCourses.length ? '今天剩下的时间可以自由安排。' : emptyMessage}</p></div>
     </article>
   {/if}
 
@@ -74,11 +77,11 @@
         {#each todayCourses as course}
           <CoursePill name={course.name} room={course.room || '教室待定'} time={course.start || `第${course.startSection}节`} color={course.color} />
         {/each}
-        {#if !todayCourses.length}<div class="empty-day">{courses.length ? '今天没有课程。' : '导入课表后，这里会显示当天课程。'}</div>{/if}
+        {#if !todayCourses.length}<div class="empty-day">{hasSchedule ? '当前没有今天的课程。' : '导入课表后，这里会显示当天课程。'}</div>{/if}
       </div>
     </div>
     <aside class="quick-stack">
-      <div class="quick-card content-surface"><span class="quick-orb orb-a"></span><div><b>{courses.length ? `${courses.length} 个本周课程时段` : '本地数据库为空'}</b><small>{currentWeek ? `已按第 ${currentWeek} 周过滤单双周` : '所有课程数据默认保存在设备本地'}</small></div></div>
+      <div class="quick-card content-surface"><span class="quick-orb orb-a"></span><div><b>{courses.length ? `${courses.length} 个本周课程时段` : hasSchedule ? '课表已保存在本地' : '本地数据库为空'}</b><small>{currentWeek ? `已按第 ${currentWeek} 周过滤单双周` : hasSchedule ? '进入教学周后会自动显示对应课程' : '所有课程数据默认保存在设备本地'}</small></div></div>
       <div class="quick-card content-surface"><span class="quick-orb orb-b"></span><div><b>隐私优先</b><small>不登录云端也可以完整使用课表</small></div></div>
     </aside>
   </div>
