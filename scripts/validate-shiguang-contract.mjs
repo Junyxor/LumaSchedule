@@ -34,9 +34,14 @@ function yamlField(block, key) {
   return match ? unquote(match[1].replace(/\s+#.*$/, '')) : '';
 }
 
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function adapterBlock(yaml, adapterId) {
-  const blocks = yaml.split(/\n(?=\s*-\s+adapter_id:)/g);
-  return blocks.find((block) => yamlField(block.replace(/^\s*-\s+/, ''), 'adapter_id') === adapterId) ?? '';
+  const id = escapeRegex(adapterId);
+  const match = yaml.match(new RegExp(`(?:^|\\n)\\s*-\\s+adapter_id:\\s*["']?${id}["']?\\s*(?:#.*)?\\n([\\s\\S]*?)(?=\\n\\s*-\\s+adapter_id:|$)`, 'm'));
+  return match ? `${match[0]}` : '';
 }
 
 function walk(dir) {
@@ -89,8 +94,8 @@ if (requireFile(gdutManifestPath, 'GDUT adapter manifest')) {
   if (!block) {
     fail('GDUT adapter manifest no longer contains adapter_id GDUT_01.');
   } else {
-    const asset = yamlField(block.replace(/^\s*-\s+/, ''), 'asset_js_path');
-    const importUrl = yamlField(block.replace(/^\s*-\s+/, ''), 'import_url');
+    const asset = yamlField(block, 'asset_js_path');
+    const importUrl = yamlField(block, 'import_url');
     const scriptPath = path.join(gdutDir, asset || '__missing__.js');
     if (!asset) fail('GDUT_01 has no asset_js_path.');
     if (!importUrl) fail('GDUT_01 has no import_url.');
