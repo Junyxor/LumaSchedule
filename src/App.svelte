@@ -81,7 +81,7 @@
     try {
       const [bootstrap, snapshot] = await Promise.all([getBootstrap(), getScheduleSnapshot()]);
       const localGlass = readLocalGlass();
-      glass = bootstrap.glassSettings ? { ...defaultGlass, ...bootstrap.glassSettings } : localGlass ?? { ...defaultGlass };
+      glass = localGlass ?? (bootstrap.glassSettings ? { ...defaultGlass, ...bootstrap.glassSettings } : { ...defaultGlass });
       scheduleSnapshot = snapshot;
       runtimeCourses = snapshot.courses;
       liveData = bootstrap.dbReady;
