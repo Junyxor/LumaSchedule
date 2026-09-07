@@ -15,6 +15,13 @@ pub struct ScheduleSnapshot {
     pub current_week: Option<u8>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AcademicWeek {
+    Unknown,
+    OutsideTerm,
+    Active(u8),
+}
+
 #[tauri::command]
 pub fn get_schedule_snapshot(db: State<'_, AppDb>) -> Result<ScheduleSnapshot, String> {
     let mut courses = db.list_latest_schedule_courses()?;
@@ -52,11 +59,18 @@ pub fn get_schedule_snapshot(db: State<'_, AppDb>) -> Result<ScheduleSnapshot, S
     };
 
     let week_count = week_count_raw.clamp(1, 64) as u8;
-    let current_week = academic_week(&term_start, week_count);
-
-    if let Some(week) = current_week {
-        courses.retain(|course| course.weeks.is_empty() || course.weeks.contains(&week));
-    }
+    let week_state = academic_week(&term_start, week_count);
+    let current_week = match week_state {
+        AcademicWeek::Active(week) => {
+            courses.retain(|course| course.weeks.is_empty() || course.weeks.contains(&week));
+            Some(week)
+        }
+        AcademicWeek::OutsideTerm => {
+            courses.clear();
+            None
+        }
+        AcademicWeek::Unknown => None,
+    };
 
     if let Ok(value) = serde_json::from_str::<Value>(&sections_json) {
         for course in &mut courses {
@@ -88,16 +102,23 @@ pub fn get_schedule_snapshot(db: State<'_, AppDb>) -> Result<ScheduleSnapshot, S
     })
 }
 
-fn academic_week(term_start: &str, week_count: u8) -> Option<u8> {
-    let start = parse_date(term_start)?;
-    let china = FixedOffset::east_opt(8 * 60 * 60)?;
+fn academic_week(term_start: &str, week_count: u8) -> AcademicWeek {
+    let Some(start) = parse_date(term_start) else { return AcademicWeek::Unknown };
+    let Some(china) = FixedOffset::east_opt(8 * 60 * 60) else { return AcademicWeek::Unknown };
     let today = Utc::now().with_timezone(&china).date_naive();
+    academic_week_for_date(start, week_count, today)
+}
+
+fn academic_week_for_date(start: NaiveDate, week_count: u8, today: NaiveDate) -> AcademicWeek {
     let days = today.signed_duration_since(start).num_days();
     if days < 0 {
-        return None;
+        return AcademicWeek::OutsideTerm;
     }
     let week = (days / 7) + 1;
-    (week >= 1 && week <= i64::from(week_count) && week <= 64).then_some(week as u8)
+    if week < 1 || week > i64::from(week_count) || week > 64 {
+        return AcademicWeek::OutsideTerm;
+    }
+    AcademicWeek::Active(week as u8)
 }
 
 fn parse_date(raw: &str) -> Option<NaiveDate> {
@@ -166,5 +187,14 @@ mod tests {
     fn accepts_common_date_formats() {
         assert_eq!(parse_date("2026-09-07"), NaiveDate::from_ymd_opt(2026, 9, 7));
         assert_eq!(parse_date("2026/09/07"), NaiveDate::from_ymd_opt(2026, 9, 7));
+    }
+
+    #[test]
+    fn detects_active_and_outside_term() {
+        let start = NaiveDate::from_ymd_opt(2026, 9, 7).unwrap();
+        assert_eq!(academic_week_for_date(start, 20, NaiveDate::from_ymd_opt(2026, 9, 7).unwrap()), AcademicWeek::Active(1));
+        assert_eq!(academic_week_for_date(start, 20, NaiveDate::from_ymd_opt(2026, 9, 20).unwrap()), AcademicWeek::Active(2));
+        assert_eq!(academic_week_for_date(start, 20, NaiveDate::from_ymd_opt(2026, 9, 1).unwrap()), AcademicWeek::OutsideTerm);
+        assert_eq!(academic_week_for_date(start, 20, NaiveDate::from_ymd_opt(2027, 2, 1).unwrap()), AcademicWeek::OutsideTerm);
     }
 }
