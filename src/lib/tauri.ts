@@ -5,7 +5,11 @@ import type {
   CourseReminderSettings,
   GlassSettings,
   ImportBundle,
+  ImportCommitResult,
+  ImportDiff,
+  ImportMode,
   ReminderSyncReport,
+  SchedulePreferences,
   ScheduleSnapshot,
   ShiguangAdapter,
   ShiguangImportStart,
@@ -38,6 +42,14 @@ export function getScheduleSnapshot() {
   return invokeNative<ScheduleSnapshot>('get_schedule_snapshot');
 }
 
+export function getSchedulePreferences() {
+  return invokeNative<SchedulePreferences>('get_schedule_preferences');
+}
+
+export function saveSchedulePreferences(preferences: SchedulePreferences) {
+  return invokeNative<SchedulePreferences>('save_schedule_preferences', { preferences });
+}
+
 export async function saveScheduleCourse(course: CourseMutation) {
   return unwrap(await invokeNative<{ value: string }>('save_schedule_course', { course }));
 }
@@ -51,13 +63,12 @@ export async function saveGlassSettings(settings: GlassSettings) {
   await invokeNative<void>('save_glass_settings', { settings }).catch(() => undefined);
 }
 
-export function commitImport(bundle: ImportBundle) {
-  return invokeNative<{
-    termId: string;
-    scheduleId: string;
-    courseCount: number;
-    meetingCount: number;
-  }>('commit_import_bundle', { bundle });
+export function previewImport(bundle: ImportBundle) {
+  return invokeNative<ImportDiff>('preview_import_bundle', { bundle });
+}
+
+export function commitImport(bundle: ImportBundle, mode: ImportMode = 'new') {
+  return invokeNative<ImportCommitResult>('commit_import_bundle', { bundle, mode });
 }
 
 export async function ensureNotificationPermission() {
