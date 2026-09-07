@@ -154,8 +154,10 @@ class ShiguangImportActivity : Activity() {
   };
   window.AndroidBridgePromise = window.shiguangBridgePromise;
   window.AndroidBridge = window.shiguangBridge;
-  window.addEventListener('unhandledrejection', event => nativeBridge.reportError(String(event.reason || 'adapter rejection')));
-  window.addEventListener('error', event => nativeBridge.reportError(String(event.error || event.message || 'adapter error')));
+  // Teaching-system pages frequently contain unrelated JS warnings. Keep those
+  // diagnostics non-fatal; adapter completion/failure is driven by bridge calls.
+  window.addEventListener('unhandledrejection', event => nativeBridge.reportDiagnostic(String(event.reason || 'page rejection')));
+  window.addEventListener('error', event => nativeBridge.reportDiagnostic(String(event.error || event.message || 'page error')));
 
 $adapterScript
 })();
@@ -224,6 +226,8 @@ $adapterScript
         }
         @JavascriptInterface
         fun reportError(message: String) { if (currentStatus() == "complete") return; save("status", "error"); save("message", message.take(1000)) }
+        @JavascriptInterface
+        fun reportDiagnostic(message: String) { android.util.Log.w("LumaShiguang", message.take(1000)) }
         private fun save(field: String, value: String) { getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(key(sessionId, field), value).apply() }
     }
 
