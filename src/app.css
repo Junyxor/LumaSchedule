@@ -4,6 +4,7 @@
 @import './styles/part4.css';
 @import './styles/part5.css';
 @import './styles/part6.css';
+@import './styles/apple-mobile.css';
 
 html, body, #app, .app-shell {
   touch-action: pan-x pan-y;
