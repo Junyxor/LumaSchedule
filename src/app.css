@@ -7,6 +7,7 @@
 @import './styles/apple-mobile.css';
 @import './styles/mobile-runtime.css';
 @import './styles/glass-live.css';
+@import './styles/perf-mobile.css';
 
 html, body, #app, .app-shell {
   touch-action: pan-x pan-y;
