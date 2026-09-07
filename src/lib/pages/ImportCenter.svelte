@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { ArrowLeft, BookOpenCheck, Building2, CalendarSync, CheckCircle2, ChevronRight, FileJson2, FileSpreadsheet, Globe2, LoaderCircle, Search, ShieldCheck, TriangleAlert, UploadCloud, X } from 'lucide-svelte';
+  import { ArrowLeft, BookOpenCheck, Building2, CalendarSync, CheckCircle2, ChevronRight, FileJson2, FileSpreadsheet, LoaderCircle, Search, ShieldCheck, TriangleAlert, UploadCloud, X } from 'lucide-svelte';
   import { closeShiguangSession, commitImport, getShiguangSession, importText, listShiguangAdapters, listShiguangSchools, startShiguangImport } from '../tauri';
   import type { ImportBundle, ShiguangAdapter, ShiguangImportStart, ShiguangSchool } from '../types';
   import { createEventDispatcher, onDestroy, tick } from 'svelte';
 
   const dispatch = createEventDispatcher<{ imported: void }>();
+  const ALL_IMPORT_ACCEPT = '.json,.ics,.ical,.csv,.tsv,.cses,.yaml,.yml';
   const sources = [
-    { icon: Globe2, title: '高校教务系统', subtitle: '搜索学校并登录官方教务系统自动导入', tag: '推荐', accent: 'violet', action: 'shiguang' },
-    { icon: FileJson2, title: 'WakeUp / JSON / CSES', subtitle: '导入分享文本、备份 JSON 与 CSES YAML', tag: '兼容', accent: 'amber', action: 'file' },
-    { icon: FileSpreadsheet, title: 'CSV / TSV', subtitle: '导入结构化表格课表', tag: '表格', accent: 'green', action: 'file' },
-    { icon: BookOpenCheck, title: 'ICS / iCalendar', subtitle: '导入标准 iCalendar 课表文件', tag: '跨平台', accent: 'blue', action: 'file' }
+    { icon: FileJson2, title: 'WakeUp / JSON / CSES', subtitle: '导入分享文本、备份 JSON 与 CSES YAML', tag: '兼容', accent: 'amber', accept: '.json,.cses,.yaml,.yml' },
+    { icon: FileSpreadsheet, title: 'CSV / TSV', subtitle: '导入结构化表格课表', tag: '表格', accent: 'green', accept: '.csv,.tsv' },
+    { icon: BookOpenCheck, title: 'ICS / iCalendar', subtitle: '导入标准 iCalendar 课表文件', tag: '跨平台', accent: 'blue', accept: '.ics,.ical' }
   ];
   const genericSchoolIds = new Set(['zhengfang_jiaowu', 'chaoxing_jiaowu', 'qingguo_jiaowu', 'urp_jiaowu']);
 
@@ -33,6 +33,11 @@
   let sessionMessage = '';
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
+  let sheetOffset = 0;
+  let sheetDragging = false;
+  let sheetDragStartY = 0;
+  let sheetPointerId: number | null = null;
+
   $: normalizedSchoolQuery = schoolQuery.trim().toLowerCase();
   $: genericSchools = schools.filter((school) => genericSchoolIds.has(school.id));
   $: directSchoolCount = schools.filter((school) => school.id !== 'GLOBAL_TOOLS' && !genericSchoolIds.has(school.id)).length;
@@ -55,6 +60,13 @@
     const text = value instanceof Error ? value.message : String(value);
     if (text.includes('not allowed by ACL')) return '应用内部权限配置异常，请更新到修复版本。';
     return text;
+  }
+
+  function openFilePicker(accept = ALL_IMPORT_ACCEPT) {
+    if (loading || !fileInput) return;
+    fileInput.value = '';
+    fileInput.accept = accept;
+    fileInput.click();
   }
 
   async function loadFile(file?: File) {
@@ -88,6 +100,7 @@
   async function openShiguang(){
     shiguangOpen=true;
     shiguangError='';
+    sheetOffset=0;
     await tick();
     schoolSearchInput?.focus({ preventScroll: true });
     if(schools.length)return;
@@ -99,6 +112,9 @@
 
   function dismissShiguang() {
     shiguangOpen = false;
+    sheetOffset = 0;
+    sheetDragging = false;
+    sheetPointerId = null;
     if (!activeSession) {
       selectedSchool = null;
       adapters = [];
@@ -108,6 +124,35 @@
 
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape' && shiguangOpen) dismissShiguang();
+  }
+
+  function beginSheetDrag(event: PointerEvent) {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    sheetDragging = true;
+    sheetPointerId = event.pointerId;
+    sheetDragStartY = event.clientY - sheetOffset;
+    (event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId);
+  }
+
+  function moveSheetDrag(event: PointerEvent) {
+    if (!sheetDragging || event.pointerId !== sheetPointerId) return;
+    sheetOffset = Math.max(0, event.clientY - sheetDragStartY);
+  }
+
+  function endSheetDrag(event: PointerEvent) {
+    if (!sheetDragging || event.pointerId !== sheetPointerId) return;
+    const shouldDismiss = sheetOffset > Math.min(140, window.innerHeight * 0.16);
+    sheetDragging = false;
+    sheetPointerId = null;
+    if (shouldDismiss) dismissShiguang();
+    else sheetOffset = 0;
+  }
+
+  function cancelSheetDrag(event: PointerEvent) {
+    if (event.pointerId !== sheetPointerId) return;
+    sheetDragging = false;
+    sheetPointerId = null;
+    sheetOffset = 0;
   }
 
   async function chooseSchool(school: ShiguangSchool){
@@ -155,7 +200,6 @@
     }
   }
 
-  function sourceAction(action:string){ if(action==='shiguang')openShiguang(); else if(action==='file')fileInput.click(); }
   onDestroy(()=>{if(pollTimer)clearTimeout(pollTimer);});
 </script>
 
@@ -169,13 +213,13 @@
     <input bind:value={schoolQuery} aria-label="搜索学校" placeholder="搜索学校，例如 广东工业大学" on:focus={openShiguang} on:input={()=>{ if(!shiguangOpen) openShiguang(); }}/>
   </div>
 
-  <div class="source-grid apple-source-list">{#each sources as source}<button class="source-card content-surface" on:click={()=>sourceAction(source.action)}><span class="source-icon {source.accent}"><svelte:component this={source.icon} size={21}/></span><div><span class="source-title"><b>{source.title}</b><em>{source.tag}</em></span><p>{source.subtitle}</p></div><ChevronRight size={18}/></button>{/each}</div>
+  <div class="source-grid apple-source-list">{#each sources as source}<button class="source-card content-surface" on:click={()=>openFilePicker(source.accept)}><span class="source-icon {source.accent}"><svelte:component this={source.icon} size={21}/></span><div><span class="source-title"><b>{source.title}</b><em>{source.tag}</em></span><p>{source.subtitle}</p></div><ChevronRight size={18}/></button>{/each}</div>
 
   <div class="import-hero content-surface" role="region" aria-label="课表文件导入" class:drag-over={dragOver} on:dragover={(e)=>{e.preventDefault();dragOver=true;}} on:dragleave={()=>dragOver=false} on:drop={onDrop}>
-    <input bind:this={fileInput} class="file-input" type="file" accept=".json,.ics,.ical,.csv,.tsv,.cses,.yaml,.yml" on:change={(e)=>loadFile(e.currentTarget.files?.[0])}/>
+    <input bind:this={fileInput} class="file-input" type="file" accept={ALL_IMPORT_ACCEPT} on:change={(e)=>loadFile(e.currentTarget.files?.[0])}/>
     <div class="upload-mark">{#if loading}<LoaderCircle class="spin" size={26}/>{:else}<UploadCloud size={26}/>{/if}</div>
     <div><h2>{loading?'正在解析…':'从文件导入'}</h2><p>支持 JSON / ICS / CSV / TSV / CSES。导入前会先预览。</p></div>
-    <button class="primary-button" on:click={()=>fileInput.click()} disabled={loading}>选择文件</button>
+    <button class="primary-button" on:click={()=>openFilePicker()} disabled={loading}>选择文件</button>
   </div>
 
   {#if committed}<div class="import-result import-success content-surface"><CheckCircle2 size={18}/><div><b>导入完成</b><span>{committed}</span></div></div>{/if}
@@ -188,8 +232,8 @@
 
 {#if shiguangOpen}
   <div class="adapter-sheet-backdrop" role="presentation" on:click={(event)=>{if(event.currentTarget===event.target)dismissShiguang();}}>
-    <div class="adapter-browser glass-panel refract" role="dialog" aria-modal="true" aria-label="高校适配仓库">
-      <div class="sheet-grabber" aria-hidden="true"></div>
+    <div class="adapter-browser glass-panel refract" class:sheet-dragging={sheetDragging} style:transform={`translate3d(0, ${sheetOffset}px, 0)`} role="dialog" aria-modal="true" aria-label="高校适配仓库">
+      <div class="sheet-grabber" role="button" tabindex="0" aria-label="向下拖动关闭高校教务搜索" on:pointerdown={beginSheetDrag} on:pointermove={moveSheetDrag} on:pointerup={endSheetDrag} on:pointercancel={cancelSheetDrag} on:keydown={(event)=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();dismissShiguang();}}}></div>
       <div class="adapter-browser-head"><div class="adapter-brand"><span><Building2 size={20}/></span><div><span class="eyebrow">高校教务</span><h2>{selectedSchool?selectedSchool.name:'选择学校'}</h2><p>{selectedSchool?'选择教务适配器':schools.length?`${directSchoolCount} 所高校 · ${genericSchools.length} 个通用教务入口`:'在线索引 + 离线快照'}</p></div></div><button class="icon-ghost" on:click={dismissShiguang} aria-label="关闭高校教务搜索"><X size={18}/></button></div>
       {#if activeSession}
         <div class="adapter-session"><div class="session-orbit"><LoaderCircle class="spin" size={22}/></div><div><b>{activeSession.schoolName} · {activeSession.adapterName}</b><span>{sessionMessage}</span><small>允许访问：{activeSession.allowedHosts.join(' · ')}</small>{#if activeSession.insecureTransport}<small class="adapter-http-warning"><TriangleAlert size={13}/> 该校旧教务仍使用 HTTP，请仅在可信网络登录。</small>{/if}</div></div>
@@ -216,4 +260,8 @@
   .generic-adapters > span { font-size: 11px; opacity: .62; }
   .generic-adapters > div { display: flex; flex-wrap: wrap; gap: 6px; }
   .generic-adapters button { min-height: 31px; padding: 0 10px; border: 1px solid rgba(91,86,214,.16); border-radius: 999px; background: rgba(91,86,214,.08); color: inherit; font-size: 11px; }
+  .adapter-browser { transition: transform .22s cubic-bezier(.2,.75,.25,1); will-change: transform; }
+  .adapter-browser.sheet-dragging { transition: none; }
+  .sheet-grabber { touch-action: none; cursor: grab; padding: 9px 10px; margin: -9px auto -7px; background-clip: content-box; box-sizing: content-box; }
+  .sheet-grabber:active { cursor: grabbing; }
 </style>
