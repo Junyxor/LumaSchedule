@@ -52,6 +52,13 @@
       })[0] ?? null;
   }
 
+  function readLocalGlass() {
+    const saved = localStorage.getItem('luma.glass');
+    if (!saved) return null;
+    try { return { ...defaultGlass, ...JSON.parse(saved) } as GlassSettings; }
+    catch { return null; }
+  }
+
   async function refreshWidgetSnapshot() {
     if (!liveData) return;
     const next = nextRemainingCourse(runtimeCourses);
@@ -73,15 +80,13 @@
   async function loadRuntimeData() {
     try {
       const [bootstrap, snapshot] = await Promise.all([getBootstrap(), getScheduleSnapshot()]);
-      if (bootstrap.glassSettings) glass = { ...defaultGlass, ...bootstrap.glassSettings };
+      const localGlass = readLocalGlass();
+      glass = bootstrap.glassSettings ? { ...defaultGlass, ...bootstrap.glassSettings } : localGlass ?? { ...defaultGlass };
       scheduleSnapshot = snapshot;
       runtimeCourses = snapshot.courses;
       liveData = bootstrap.dbReady;
     } catch {
-      const saved = localStorage.getItem('luma.glass');
-      if (saved) {
-        try { glass = { ...defaultGlass, ...JSON.parse(saved) }; } catch {}
-      }
+      glass = readLocalGlass() ?? { ...defaultGlass };
       scheduleSnapshot = { courses: [], hasSchedule: false };
       runtimeCourses = [];
       liveData = false;
@@ -131,7 +136,7 @@
     {#if page === 'today'}
       <Today courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} />
     {:else if page === 'week'}
-      <Week courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} />
+      <Week courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} on:changed={loadRuntimeData} />
     {:else if page === 'import'}
       <ImportCenter on:imported={loadRuntimeData} />
     {:else if page === 'widgets'}
