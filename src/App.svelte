@@ -12,7 +12,7 @@
 
   let page: PageId = 'today';
   let glass: GlassSettings = { ...defaultGlass };
-  let scheduleSnapshot: ScheduleSnapshot = { courses: [] };
+  let scheduleSnapshot: ScheduleSnapshot = { courses: [], hasSchedule: false };
   let runtimeCourses: Course[] = [];
   let liveData = false;
   let runtimeReady = false;
@@ -64,8 +64,8 @@
       return;
     }
     await publishWidgetSnapshot({
-      courseName: runtimeCourses.length ? '本周课程已结束' : '暂无课程',
-      courseMeta: runtimeCourses.length ? '下周课程将在新一周自动更新' : '打开 LumaSchedule 导入课表',
+      courseName: scheduleSnapshot.hasSchedule ? '当前周没有课程' : '暂无课程',
+      courseMeta: scheduleSnapshot.hasSchedule ? '课表已保存，进入教学周后会自动更新' : '打开 LumaSchedule 导入课表',
       countdown: scheduleSnapshot.currentWeek ? `第 ${scheduleSnapshot.currentWeek} 周` : '--'
     });
   }
@@ -82,7 +82,7 @@
       if (saved) {
         try { glass = { ...defaultGlass, ...JSON.parse(saved) }; } catch {}
       }
-      scheduleSnapshot = { courses: [] };
+      scheduleSnapshot = { courses: [], hasSchedule: false };
       runtimeCourses = [];
       liveData = false;
     } finally {
@@ -129,9 +129,9 @@
   </aside>
   <main class="main-stage">
     {#if page === 'today'}
-      <Today courses={runtimeCourses} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} />
+      <Today courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} />
     {:else if page === 'week'}
-      <Week courses={runtimeCourses} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} />
+      <Week courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} />
     {:else if page === 'import'}
       <ImportCenter on:imported={loadRuntimeData} />
     {:else if page === 'widgets'}
