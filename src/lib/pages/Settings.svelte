@@ -1,9 +1,26 @@
 <script lang="ts">
-  import { Bell, Cloud, Database, Download, Github, Palette, RefreshCw, Shield, Upload } from 'lucide-svelte';
+  import { Bell, Cloud, Database, Download, ExternalLink, Github, Palette, RefreshCw, Shield, Upload } from 'lucide-svelte';
   import { confirm } from '@tauri-apps/plugin-dialog';
   import { onDestroy, onMount } from 'svelte';
-  import type { GlassSettings, WebDavCredentials, WebDavProfile } from '../types';
-  import { getWebDavProfile, restoreFullBackupFromFile, restoreWebDavBackup, saveFullBackup, saveGlassSettings, saveLatestScheduleIcs, saveLatestScheduleJson, saveWebDavProfile, scheduleTestReminder, testNotification, testWebDav, uploadWebDavBackup } from '../tauri';
+  import type { CourseReminderSettings, GlassSettings, WebDavCredentials, WebDavProfile } from '../types';
+  import {
+    ensureNotificationPermission,
+    getCourseReminderSettings,
+    getWebDavProfile,
+    restoreFullBackupFromFile,
+    restoreWebDavBackup,
+    saveCourseReminderSettings,
+    saveFullBackup,
+    saveGlassSettings,
+    saveLatestScheduleIcs,
+    saveLatestScheduleJson,
+    saveWebDavProfile,
+    scheduleTestReminder,
+    syncCourseReminders,
+    testNotification,
+    testWebDav,
+    uploadWebDavBackup
+  } from '../tauri';
 
   export let glass: GlassSettings;
   type NumericGlassKey = Exclude<keyof GlassSettings, 'motion'>;
@@ -15,8 +32,16 @@
   let webdavStatus = '';
   let dataStatus = '';
   let dataBusy = false;
+  let reminder: CourseReminderSettings = { enabled: false, offsetMinutes: 15 };
+  let reminderBusy = false;
+  let reminderStatus = '';
+  const reminderOffsets = [5, 10, 15, 20, 30, 60];
 
-  onMount(async () => { try { webdav = await getWebDavProfile(); } catch {} });
+  onMount(async () => {
+    const [profileResult, reminderResult] = await Promise.allSettled([getWebDavProfile(), getCourseReminderSettings()]);
+    if (profileResult.status === 'fulfilled') webdav = profileResult.value;
+    if (reminderResult.status === 'fulfilled') reminder = reminderResult.value;
+  });
   onDestroy(() => {
     if (glassSaveTimer) clearTimeout(glassSaveTimer);
     void saveGlassSettings(glass);
@@ -39,6 +64,72 @@
   }
 
   function credentials(): WebDavCredentials { return { ...webdav, password: webdavPassword }; }
+
+  function reminderSummary(futureCount: number, scheduledCount = 0, cancelledCount = 0) {
+    const changes = [scheduledCount ? `新增 ${scheduledCount}` : '', cancelledCount ? `取消 ${cancelledCount}` : ''].filter(Boolean).join('，');
+    return `已安排 ${futureCount} 个未来课程提醒${changes ? `（${changes}）` : ''}。`;
+  }
+
+  async function setReminderEnabled() {
+    if (reminderBusy) return;
+    reminderStatus = '';
+    reminderBusy = true;
+    try {
+      const enabled = !reminder.enabled;
+      if (enabled && !(await ensureNotificationPermission())) {
+        reminderStatus = '没有获得系统通知权限，课程提醒未开启。';
+        return;
+      }
+      reminder = await saveCourseReminderSettings({ ...reminder, enabled });
+      const report = await syncCourseReminders();
+      reminderStatus = enabled
+        ? reminderSummary(report.futureCount, report.scheduledCount, report.cancelledCount)
+        : `课程提醒已关闭，取消 ${report.cancelledCount} 个未来提醒。`;
+    } catch (error) {
+      reminderStatus = error instanceof Error ? error.message : String(error);
+    } finally {
+      reminderBusy = false;
+    }
+  }
+
+  async function setReminderOffset(offsetMinutes: number) {
+    if (reminderBusy || reminder.offsetMinutes === offsetMinutes) return;
+    reminderStatus = '';
+    reminderBusy = true;
+    try {
+      reminder = await saveCourseReminderSettings({ ...reminder, offsetMinutes });
+      if (reminder.enabled) {
+        const report = await syncCourseReminders();
+        reminderStatus = reminderSummary(report.futureCount, report.scheduledCount, report.cancelledCount);
+      } else {
+        reminderStatus = `默认提前 ${offsetMinutes} 分钟，开启课程提醒后生效。`;
+      }
+    } catch (error) {
+      reminderStatus = error instanceof Error ? error.message : String(error);
+    } finally {
+      reminderBusy = false;
+    }
+  }
+
+  async function resyncReminders() {
+    if (reminderBusy) return;
+    reminderStatus = '';
+    reminderBusy = true;
+    try {
+      if (reminder.enabled && !(await ensureNotificationPermission())) {
+        reminderStatus = '没有获得系统通知权限。';
+        return;
+      }
+      const report = await syncCourseReminders();
+      reminderStatus = report.enabled
+        ? reminderSummary(report.futureCount, report.scheduledCount, report.cancelledCount)
+        : '课程提醒当前处于关闭状态。';
+    } catch (error) {
+      reminderStatus = error instanceof Error ? error.message : String(error);
+    } finally {
+      reminderBusy = false;
+    }
+  }
 
   async function withWebDav(action: 'test' | 'upload' | 'restore') {
     webdavStatus = ''; webdavBusy = true;
@@ -110,9 +201,17 @@
     </article>
 
     <article class="settings-card glass-panel">
-      <div class="settings-title"><span><Bell size={19} /></span><div><b>提醒测试</b><p>只保留当前已经接通的系统能力。</p></div></div>
-      <button class="setting-row" on:click={testNotification}><div><b>即时测试通知</b><span>验证 Android 通知权限与展示</span></div><em>立即</em></button>
-      <button class="setting-row" on:click={() => scheduleTestReminder(60_000)}><div><b>后台定时提醒</b><span>由 Android AlarmManager 在 1 分钟后触发</span></div><em>1 分钟</em></button>
+      <div class="settings-title"><span><Bell size={19} /></span><div><b>课程提醒</b><p>Android 原生 AlarmManager 调度，应用被回收或重启后仍可恢复。</p></div></div>
+      <button class="toggle-row" on:click={setReminderEnabled} disabled={reminderBusy}><span><b>上课前提醒</b><small>{reminder.enabled ? `每节课提前 ${reminder.offsetMinutes} 分钟` : '当前关闭'}</small></span><i class:on={reminder.enabled}></i></button>
+      <div class="reminder-offsets" aria-label="课程提醒提前时间">
+        {#each reminderOffsets as offset}
+          <button class:active={reminder.offsetMinutes === offset} on:click={() => setReminderOffset(offset)} disabled={reminderBusy}>{offset === 60 ? '1 小时' : `${offset} 分钟`}</button>
+        {/each}
+      </div>
+      <button class="setting-row" on:click={resyncReminders} disabled={reminderBusy}><div><b>重新同步未来提醒</b><span>导入、编辑课表后会按当前课程重新计算</span></div><em>同步</em></button>
+      <button class="setting-row" on:click={testNotification}><div><b>即时测试通知</b><span>验证系统通知权限与通知渠道</span></div><em>立即</em></button>
+      <button class="setting-row" on:click={() => scheduleTestReminder(60_000)}><div><b>后台定时测试</b><span>1 分钟后由 Android 原生闹钟触发</span></div><em>1 分钟</em></button>
+      {#if reminderStatus}<div class="settings-status">{reminderStatus}</div>{/if}
     </article>
 
     <article class="settings-card glass-panel">
@@ -143,7 +242,16 @@
       <div class="setting-row readonly-row"><div><b>教务适配器</b><span>仅允许声明的教务域名与受限 Bridge</span></div><em>沙箱</em></div>
     </article>
 
-    <article class="about-card glass-panel"><Github size={19} /><div><b>100% 开源 · 无广告</b><span>Apache-2.0 · Core powered by Rust</span></div></article>
+    <a class="about-card glass-panel about-link" href="https://github.com/Junyxor/LumaSchedule" target="_blank" rel="noreferrer">
+      <Github size={19} />
+      <div><b>LumaSchedule · GitHub</b><span>github.com/Junyxor/LumaSchedule · Apache-2.0</span></div>
+      <ExternalLink size={15} />
+    </a>
+    <div class="project-sources">
+      <b>参考与数据来源</b>
+      <span>拾光课表 / shiguang_warehouse · WakeUp Schedule · CSES / ClassIsland · BetterUntis · AntAlmanac</span>
+      <small>第三方项目仅用于协议兼容、产品设计与架构参考；代码和数据继续遵循各自许可证。</small>
+    </div>
   </aside></div>
 </section>
 
@@ -176,4 +284,18 @@
   .glass-preview-card span { font-size: 11px; opacity: .62; }
   .glass-preview-card b { font-size: 20px; margin: 3px 0 4px; }
   .glass-preview-card small { font-size: 11px; line-height: 1.45; opacity: .66; }
+  .reminder-offsets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0 6px; }
+  .reminder-offsets button { min-height: 38px; border: 1px solid rgba(118,118,128,.14); border-radius: 12px; background: rgba(118,118,128,.07); font-size: 12px; color: inherit; }
+  .reminder-offsets button.active { color: #5751c9; border-color: rgba(91,86,214,.28); background: rgba(91,86,214,.10); font-weight: 650; }
+  .toggle-row span { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+  .toggle-row small { font-size: 11px; font-weight: 400; opacity: .58; }
+  .about-link { color: inherit; text-decoration: none; }
+  .about-link > svg:last-child { margin-left: auto; opacity: .45; }
+  .project-sources { padding: 4px 5px 0; display: grid; gap: 5px; color: rgba(60,60,67,.68); }
+  .project-sources b { font-size: 12px; color: inherit; }
+  .project-sources span { font-size: 11px; line-height: 1.5; }
+  .project-sources small { font-size: 10px; line-height: 1.45; opacity: .75; }
+  @media (prefers-color-scheme: dark) {
+    .project-sources { color: rgba(235,235,245,.62); }
+  }
 </style>
