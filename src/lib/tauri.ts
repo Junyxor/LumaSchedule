@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
-import type { BackupSummary, Course, CourseMutation, GlassSettings, ImportBundle, ScheduleSnapshot, ShiguangAdapter, ShiguangImportStart, ShiguangSchool, ShiguangSessionSnapshot, WebDavCredentials, WebDavProfile, WebDavResult } from './types';
+import type { BackupSummary, Course, CourseMutation, CourseReminderSettings, GlassSettings, ImportBundle, ReminderSyncReport, ScheduleSnapshot, ShiguangAdapter, ShiguangImportStart, ShiguangSchool, ShiguangSessionSnapshot, WebDavCredentials, WebDavProfile, WebDavResult } from './types';
 
 export async function getBootstrap() { return invoke<{ appVersion: string; glassSettings?: GlassSettings | null; dbReady: boolean }>('get_bootstrap'); }
 export async function listScheduleCourses() { return invoke<Course[]>('list_schedule_courses'); }
@@ -12,15 +12,25 @@ export async function deleteScheduleCourse(id: string) { return invoke<void>('de
 export async function saveGlassSettings(settings: GlassSettings) { try { return await invoke('save_glass_settings', { settings }); } catch { localStorage.setItem('luma.glass', JSON.stringify(settings)); } }
 export async function importText(format: string, payload: string) { return invoke<ImportBundle>('import_schedule_text', { format, payload }); }
 export async function commitImport(bundle: ImportBundle) { return invoke<{ termId: string; scheduleId: string; courseCount: number; meetingCount: number }>('commit_import_bundle', { bundle }); }
-export async function testNotification() {
-  let granted = await isPermissionGranted(); if (!granted) granted = (await requestPermission()) === 'granted';
-  if (granted) sendNotification({ title: 'LumaSchedule', body: '测试通知发送成功。课程提醒可以正常显示。' });
+
+export async function ensureNotificationPermission() {
+  let granted = await isPermissionGranted();
+  if (!granted) granted = (await requestPermission()) === 'granted';
+  return granted;
 }
+export async function testNotification() {
+  const granted = await ensureNotificationPermission();
+  if (granted) sendNotification({ title: 'LumaSchedule', body: '测试通知发送成功。课程提醒可以正常显示。' });
+  return granted;
+}
+export async function getCourseReminderSettings() { return invoke<CourseReminderSettings>('get_course_reminder_settings'); }
+export async function saveCourseReminderSettings(settings: CourseReminderSettings) { return invoke<CourseReminderSettings>('save_course_reminder_settings', { settings }); }
+export async function syncCourseReminders() { return invoke<ReminderSyncReport>('sync_course_reminders'); }
 export async function publishWidgetSnapshot(snapshot: { courseName: string; courseMeta: string; countdown: string; }) {
   try { return await invoke<boolean>('update_widget_snapshot', { snapshot }); } catch { return false; }
 }
 export async function scheduleTestReminder(delayMs = 60_000) {
-  let granted = await isPermissionGranted(); if (!granted) granted = (await requestPermission()) === 'granted'; if (!granted) return false;
+  const granted = await ensureNotificationPermission(); if (!granted) return false;
   const id = Math.floor(Date.now() % 2_000_000_000);
   return invoke<boolean>('schedule_native_reminder', { reminder: { id, triggerAtEpochMs: Date.now() + delayMs, title: 'LumaSchedule · 测试提醒', body: '后台定时提醒触发成功。' } });
 }
