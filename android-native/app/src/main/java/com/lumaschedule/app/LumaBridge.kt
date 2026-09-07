@@ -9,13 +9,17 @@ import android.content.Intent
 import android.os.SystemClock
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import com.lumaschedule.app.data.DataTransferEngine
 import com.lumaschedule.app.data.LumaDatabase
 import com.lumaschedule.app.reminders.CourseReminderEngine
 import com.lumaschedule.app.shiguang.ShiguangRepository
+import com.lumaschedule.app.sync.WebDavClient
 import com.lumaschedule.app.widgets.BootReceiver
 import com.lumaschedule.app.widgets.NextCourseWidgetProvider
 import com.lumaschedule.app.widgets.ReminderReceiver
 import org.json.JSONObject
+import java.io.File
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.ExecutorService
 
 class LumaBridge(
@@ -32,6 +36,10 @@ class LumaBridge(
     private val shiguang by lazy(LazyThreadSafetyMode.NONE) {
         ShiguangRepository(activity.applicationContext)
     }
+    private val transfer by lazy(LazyThreadSafetyMode.NONE) {
+        DataTransferEngine(File(activity.filesDir, "lumaschedule.sqlite"))
+    }
+    private val webDav by lazy(LazyThreadSafetyMode.NONE) { WebDavClient() }
 
     @JavascriptInterface
     fun request(id: String, command: String, payload: String?) {
@@ -174,9 +182,96 @@ class LumaBridge(
                 "null"
             }
 
+            "export_latest_schedule_json_to_file" -> saveTextDocument(
+                "application/json",
+                "lumaschedule-schedule.json",
+                transfer.exportCanonicalJson()
+            ).toString()
+
+            "export_latest_schedule_ics_to_file" -> saveTextDocument(
+                "text/calendar",
+                "lumaschedule-schedule.ics",
+                transfer.exportIcs()
+            ).toString()
+
+            "export_full_backup_to_file" -> saveTextDocument(
+                "application/json",
+                "lumaschedule-latest.luma.json",
+                transfer.exportFullBackup(BuildConfig.VERSION_NAME)
+            ).toString()
+
+            "restore_full_backup_from_file" -> {
+                val uri = activity.openDocumentBlocking(
+                    arrayOf("application/json", "application/octet-stream", "text/plain")
+                ) ?: return "null"
+                val text = activity.contentResolver.openInputStream(uri)
+                    ?.bufferedReader(StandardCharsets.UTF_8)
+                    ?.use { it.readText() }
+                    ?: error("无法读取备份文件。")
+                val summary = transfer.restoreFullBackup(text)
+                resyncRemindersIfEnabled()
+                summary.toString()
+            }
+
+            "get_webdav_profile" -> {
+                database.getSettingRaw(WEB_DAV_PROFILE_KEY)
+                    ?: JSONObject()
+                        .put("baseUrl", "")
+                        .put("username", "")
+                        .put("remotePath", "LumaSchedule/lumaschedule-latest.luma.json")
+                        .toString()
+            }
+
+            "save_webdav_profile" -> {
+                val profile = sanitizeWebDavProfile(args.getJSONObject("profile"))
+                database.setSettingRaw(WEB_DAV_PROFILE_KEY, profile.toString())
+                "null"
+            }
+
+            "webdav_test" -> webDav
+                .test(args.getJSONObject("credentials"))
+                .toString()
+
+            "webdav_upload_backup" -> {
+                val credentials = args.getJSONObject("credentials")
+                val backup = transfer.exportFullBackup(BuildConfig.VERSION_NAME)
+                val result = webDav.upload(credentials, backup)
+                result.put("backup", transfer.backupSummary(backup)).toString()
+            }
+
+            "webdav_restore_backup" -> {
+                val credentials = args.getJSONObject("credentials")
+                val (result, backup) = webDav.download(credentials)
+                if (!result.optBoolean("ok") || backup == null) return result.toString()
+                val summary = transfer.restoreFullBackup(backup)
+                resyncRemindersIfEnabled()
+                result
+                    .put("message", "云端完整备份已恢复。")
+                    .put("backup", summary)
+                    .toString()
+            }
+
             else -> error("Native command not implemented yet: $command")
         }
     }
+
+    private fun saveTextDocument(mimeType: String, suggestedName: String, text: String): Boolean {
+        val uri = activity.createDocumentBlocking(mimeType, suggestedName) ?: return false
+        activity.contentResolver.openOutputStream(uri, "wt")?.use { stream ->
+            stream.write(text.toByteArray(StandardCharsets.UTF_8))
+            stream.flush()
+        } ?: error("无法写入选择的文件。")
+        return true
+    }
+
+    private fun sanitizeWebDavProfile(input: JSONObject): JSONObject = JSONObject()
+        .put("baseUrl", input.optString("baseUrl").trim())
+        .put("username", input.optString("username").trim())
+        .put(
+            "remotePath",
+            input.optString("remotePath", "LumaSchedule/lumaschedule-latest.luma.json").trim()
+                .ifBlank { "LumaSchedule/lumaschedule-latest.luma.json" }
+        )
 
     private fun resyncRemindersIfEnabled() {
         val enabled = database.getSettingRaw("reminders.course.default")
@@ -279,5 +374,9 @@ class LumaBridge(
     private fun resolve(id: String, ok: Boolean, payload: String) {
         val script = "window.__lumaNativeResolve(${JSONObject.quote(id)},${if (ok) "true" else "false"},${JSONObject.quote(payload)});"
         activity.runOnUiThread { webView.evaluateJavascript(script, null) }
+    }
+
+    companion object {
+        private const val WEB_DAV_PROFILE_KEY = "sync.webdav.profile"
     }
 }
