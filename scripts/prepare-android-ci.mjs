@@ -79,8 +79,8 @@ if (wantsSigning || wantsShrink) {
   let gradle = fs.readFileSync(gradlePath, 'utf8');
 
   if (wantsSigning) {
-    if (!gradle.includes('java.util.Properties')) {
-      gradle = `import java.util.Properties\nimport java.io.FileInputStream\n${gradle}`;
+    if (!gradle.includes('import java.util.Properties')) {
+      gradle = `import java.util.Properties\n${gradle}`;
     }
     if (!gradle.includes('lumaRelease')) {
       const block = `
@@ -88,7 +88,7 @@ if (wantsSigning || wantsShrink) {
         create("lumaRelease") {
             val propsFile = rootProject.file("keystore.properties")
             val props = Properties()
-            if (propsFile.exists()) props.load(FileInputStream(propsFile))
+            if (propsFile.exists()) propsFile.inputStream().use { props.load(it) }
             keyAlias = props["keyAlias"] as String
             keyPassword = props["keyPassword"] as String
             storeFile = file(props["storeFile"] as String)
