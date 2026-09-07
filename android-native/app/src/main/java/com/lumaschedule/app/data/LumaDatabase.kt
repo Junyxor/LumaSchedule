@@ -18,9 +18,8 @@ class LumaDatabase(context: Context) : Closeable {
 
     init {
         synchronized(lock) {
-            db.execSQL("PRAGMA journal_mode=WAL")
-            db.execSQL("PRAGMA foreign_keys=ON")
-            db.execSQL("PRAGMA synchronous=NORMAL")
+            db.enableWriteAheadLogging()
+            db.setForeignKeyConstraintsEnabled(true)
             createSchema()
         }
     }
@@ -42,7 +41,6 @@ class LumaDatabase(context: Context) : Closeable {
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_courses_schedule ON courses(schedule_id)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_meetings_course_day ON course_meetings(course_id, weekday, start_section)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_schedules_term ON schedules(term_id)")
-        runCatching { db.execSQL("PRAGMA optimize") }
     }
 
     fun getSettingRaw(key: String): String? = synchronized(lock) {
