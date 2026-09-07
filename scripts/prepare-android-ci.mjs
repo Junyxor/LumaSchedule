@@ -72,19 +72,23 @@ if (!manifest.includes('ShiguangImportActivity')) {
 }
 fs.writeFileSync(manifestPath, manifest);
 
-if (process.argv.includes('--signing')) {
+const wantsSigning = process.argv.includes('--signing');
+const wantsShrink = process.argv.includes('--shrink');
+if (wantsSigning || wantsShrink) {
   const gradlePath = path.join(appRoot, 'build.gradle.kts');
   let gradle = fs.readFileSync(gradlePath, 'utf8');
-  if (!gradle.includes('java.util.Properties')) {
-    gradle = `import java.util.Properties\nimport java.io.FileInputStream\n${gradle}`;
-  }
-  if (!gradle.includes('lumaRelease')) {
-    const block = `
+
+  if (wantsSigning) {
+    if (!gradle.includes('import java.util.Properties')) {
+      gradle = `import java.util.Properties\n${gradle}`;
+    }
+    if (!gradle.includes('lumaRelease')) {
+      const block = `
     signingConfigs {
         create("lumaRelease") {
             val propsFile = rootProject.file("keystore.properties")
             val props = Properties()
-            if (propsFile.exists()) props.load(FileInputStream(propsFile))
+            if (propsFile.exists()) propsFile.inputStream().use { props.load(it) }
             keyAlias = props["keyAlias"] as String
             keyPassword = props["keyPassword"] as String
             storeFile = file(props["storeFile"] as String)
@@ -92,10 +96,23 @@ if (process.argv.includes('--signing')) {
         }
     }
 `;
-    gradle = gradle.replace(/android\s*\{/, (m) => `${m}${block}`);
-    gradle = gradle.replace(/getByName\("release"\)\s*\{/, (m) => `${m}\n            signingConfig = signingConfigs.getByName("lumaRelease")\n`);
-    fs.writeFileSync(gradlePath, gradle);
+      gradle = gradle.replace(/android\s*\{/, (m) => `${m}${block}`);
+      gradle = gradle.replace(/getByName\("release"\)\s*\{/, (m) => `${m}\n            signingConfig = signingConfigs.getByName("lumaRelease")\n`);
+    }
   }
+
+  if (wantsShrink && !gradle.includes('isMinifyEnabled = true')) {
+    gradle = gradle.replace(
+      /getByName\("release"\)\s*\{/,
+      (m) => `${m}\n            isMinifyEnabled = true\n            isShrinkResources = true\n            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")\n`
+    );
+  }
+
+  fs.writeFileSync(gradlePath, gradle);
 }
 
-console.log('Android project patched: widget + reboot-safe reminders + native bridge' + (process.argv.includes('--signing') ? ' + release signing' : ''));
+console.log(
+  'Android project patched: widget + reboot-safe reminders + native bridge' +
+    (wantsSigning ? ' + release signing' : '') +
+    (wantsShrink ? ' + R8/resource shrinking' : '')
+);
