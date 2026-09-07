@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowLeft, BookOpenCheck, Building2, CalendarSync, CheckCircle2, ChevronRight, FileJson2, FileSpreadsheet, Globe2, LoaderCircle, RefreshCw, Search, ShieldCheck, TriangleAlert, UploadCloud, X } from 'lucide-svelte';
+  import { ArrowLeft, BookOpenCheck, Building2, CalendarSync, CheckCircle2, ChevronRight, FileJson2, FileSpreadsheet, Globe2, LoaderCircle, Search, ShieldCheck, TriangleAlert, UploadCloud, X } from 'lucide-svelte';
   import { closeShiguangSession, commitImport, getShiguangSession, importText, listShiguangAdapters, listShiguangSchools, startShiguangImport } from '../tauri';
   import type { ImportBundle, ShiguangAdapter, ShiguangImportStart, ShiguangSchool } from '../types';
   import { createEventDispatcher, onDestroy, tick } from 'svelte';
@@ -11,6 +11,7 @@
     { icon: FileSpreadsheet, title: 'CSV / TSV', subtitle: '导入结构化表格课表', tag: '表格', accent: 'green', action: 'file' },
     { icon: BookOpenCheck, title: 'ICS / iCalendar', subtitle: '导入标准 iCalendar 课表文件', tag: '跨平台', accent: 'blue', action: 'file' }
   ];
+  const genericSchoolIds = new Set(['zhengfang_jiaowu', 'chaoxing_jiaowu', 'qingguo_jiaowu', 'urp_jiaowu']);
 
   let fileInput: HTMLInputElement;
   let schoolSearchInput: HTMLInputElement;
@@ -33,10 +34,13 @@
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
 
   $: normalizedSchoolQuery = schoolQuery.trim().toLowerCase();
+  $: genericSchools = schools.filter((school) => genericSchoolIds.has(school.id));
+  $: directSchoolCount = schools.filter((school) => school.id !== 'GLOBAL_TOOLS' && !genericSchoolIds.has(school.id)).length;
   $: filteredSchools = schools
+    .filter((school) => school.id !== 'GLOBAL_TOOLS' && !genericSchoolIds.has(school.id))
     .filter((school) => !normalizedSchoolQuery || school.name.toLowerCase().includes(normalizedSchoolQuery) || school.id.toLowerCase().includes(normalizedSchoolQuery) || school.initial.toLowerCase().includes(normalizedSchoolQuery))
     .sort((a,b) => Number(b.id === 'GDUT') - Number(a.id === 'GDUT') || a.initial.localeCompare(b.initial, 'zh-CN'))
-    .slice(0,80);
+    .slice(0,100);
 
   function formatFor(name: string) {
     const ext = name.toLowerCase().split('.').pop() ?? '';
@@ -186,18 +190,30 @@
   <div class="adapter-sheet-backdrop" role="presentation" on:click={(event)=>{if(event.currentTarget===event.target)dismissShiguang();}}>
     <div class="adapter-browser glass-panel refract" role="dialog" aria-modal="true" aria-label="高校适配仓库">
       <div class="sheet-grabber" aria-hidden="true"></div>
-      <div class="adapter-browser-head"><div class="adapter-brand"><span><Building2 size={20}/></span><div><span class="eyebrow">高校教务</span><h2>{selectedSchool?selectedSchool.name:'选择学校'}</h2><p>{selectedSchool?'选择教务适配器':'搜索已适配高校'}</p></div></div><button class="icon-ghost" on:click={dismissShiguang} aria-label="关闭高校教务搜索"><X size={18}/></button></div>
+      <div class="adapter-browser-head"><div class="adapter-brand"><span><Building2 size={20}/></span><div><span class="eyebrow">高校教务</span><h2>{selectedSchool?selectedSchool.name:'选择学校'}</h2><p>{selectedSchool?'选择教务适配器':schools.length?`${directSchoolCount} 所高校 · ${genericSchools.length} 个通用教务入口`:'在线索引 + 离线快照'}</p></div></div><button class="icon-ghost" on:click={dismissShiguang} aria-label="关闭高校教务搜索"><X size={18}/></button></div>
       {#if activeSession}
         <div class="adapter-session"><div class="session-orbit"><LoaderCircle class="spin" size={22}/></div><div><b>{activeSession.schoolName} · {activeSession.adapterName}</b><span>{sessionMessage}</span><small>允许访问：{activeSession.allowedHosts.join(' · ')}</small>{#if activeSession.insecureTransport}<small class="adapter-http-warning"><TriangleAlert size={13}/> 该校旧教务仍使用 HTTP，请仅在可信网络登录。</small>{/if}</div></div>
       {:else if selectedSchool}
         <div class="adapter-subbar"><button on:click={backToSchools}><ArrowLeft size={15}/> 返回</button><span>{adapters.length} 个适配器</span></div>
         <div class="adapter-list">{#if shiguangLoading}<div class="adapter-loading"><LoaderCircle class="spin" size={20}/> 正在读取适配器…</div>{:else}{#each adapters as adapter}<button class="adapter-row" on:click={()=>beginShiguang(adapter)} disabled={!adapter.importUrl}><span class="adapter-row-icon"><CalendarSync size={18}/></span><div><b>{adapter.adapterName}</b><p>{adapter.description}</p><small>{adapter.category} · {adapter.maintainer}</small></div><ChevronRight size={17}/></button>{/each}{#if !adapters.length}<div class="adapter-empty">这个学校暂时没有可用的网页登录适配器。</div>{/if}{/if}</div>
       {:else}
-        <div class="school-search"><Search size={17}/><input bind:this={schoolSearchInput} bind:value={schoolQuery} aria-label="学校名称" placeholder="输入学校名称，例如 广东工业大学"/><button on:click={async()=>{schools=[];await openShiguang();}} aria-label="刷新学校索引"><RefreshCw size={15}/></button></div>
-        {#if shiguangLoading}<div class="adapter-loading"><LoaderCircle class="spin" size={20}/> 正在读取学校索引…</div>{:else}<div class="school-list">{#each filteredSchools as school}<button class:featured-school={school.id==='GDUT'} on:click={()=>chooseSchool(school)}><span>{school.initial.slice(0,1)||'校'}</span><div><b>{school.name}</b><small>{school.id}</small></div>{#if school.id==='GDUT'}<em>已验证</em>{/if}<ChevronRight size={16}/></button>{/each}{#if !filteredSchools.length}<div class="adapter-empty">没有找到匹配学校。</div>{/if}</div>{/if}
+        <div class="school-search"><Search size={17}/><input bind:this={schoolSearchInput} bind:value={schoolQuery} aria-label="学校名称" placeholder="输入学校名称，例如 广东工业大学"/></div>
+        {#if shiguangLoading}<div class="adapter-loading"><LoaderCircle class="spin" size={20}/> 正在读取学校索引…</div>{:else}
+          {#if genericSchools.length}
+            <div class="generic-adapters"><span>学校没单独适配？尝试通用教务</span><div>{#each genericSchools as school}<button on:click={()=>chooseSchool(school)}>{school.name.replace('-通用教务','')}</button>{/each}</div></div>
+          {/if}
+          <div class="school-list">{#each filteredSchools as school}<button class:featured-school={school.id==='GDUT'} on:click={()=>chooseSchool(school)}><span>{school.initial.slice(0,1)||'校'}</span><div><b>{school.name}</b><small>{school.id}</small></div>{#if school.id==='GDUT'}<em>已验证</em>{/if}<ChevronRight size={16}/></button>{/each}{#if !filteredSchools.length}<div class="adapter-empty">没有找到匹配学校。可以尝试上方通用教务，或使用 JSON / ICS / CSV 导入。</div>{/if}</div>
+        {/if}
       {/if}
       {#if shiguangError}<div class="adapter-error"><X size={15}/> {shiguangError}</div>{/if}
-      <div class="adapter-sandbox-note"><ShieldCheck size={16}/><span>适配脚本只获得声明过的教务域名权限。</span></div>
+      <div class="adapter-sandbox-note"><ShieldCheck size={16}/><span>适配数据来自开源 shiguang_warehouse；在线优先，离线回退随 App 打包的最近快照。</span></div>
     </div>
   </div>
 {/if}
+
+<style>
+  .generic-adapters { display: grid; gap: 7px; padding: 0 2px; }
+  .generic-adapters > span { font-size: 11px; opacity: .62; }
+  .generic-adapters > div { display: flex; flex-wrap: wrap; gap: 6px; }
+  .generic-adapters button { min-height: 31px; padding: 0 10px; border: 1px solid rgba(91,86,214,.16); border-radius: 999px; background: rgba(91,86,214,.08); color: inherit; font-size: 11px; }
+</style>
