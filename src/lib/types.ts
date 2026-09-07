@@ -6,8 +6,44 @@ export interface ScheduleSnapshot { courses: Course[]; hasSchedule: boolean; ter
 export interface GlassSettings { blur: number; opacity: number; saturation: number; highlight: number; refraction: number; noise: number; motion: boolean; }
 export interface CourseReminderSettings { enabled: boolean; offsetMinutes: number; }
 export interface ReminderSyncReport { enabled: boolean; futureCount: number; scheduledCount: number; cancelledCount: number; skippedCount: number; }
+export interface SchedulePreferences {
+  hasSchedule: boolean;
+  termName: string;
+  termStart: string;
+  weekCount: number;
+  timezone: string;
+  weekStartsOn: number;
+  showWeekend: boolean;
+  showTeacher: boolean;
+  showRoom: boolean;
+  showTime: boolean;
+  compactMode: boolean;
+  defaultSections: number;
+}
 export interface ImportedCourse { name: string; teacher?: string | null; location?: string | null; weekday: number; startSection: number; endSection: number; weeks: number[]; startTime?: string | null; endTime?: string | null; }
 export interface ImportBundle { source: string; termName?: string | null; termStart?: string | null; courses: ImportedCourse[]; metadata: Record<string, string>; }
+export type ImportMode = 'new' | 'merge' | 'overwrite';
+export interface ImportDiff {
+  hasExistingSchedule: boolean;
+  existingCourseCount: number;
+  existingMeetingCount: number;
+  incomingCourseCount: number;
+  incomingMeetingCount: number;
+  newCount: number;
+  duplicateCount: number;
+  conflictCount: number;
+  removeCount: number;
+}
+export interface ImportCommitResult {
+  mode: ImportMode;
+  termId: string;
+  scheduleId: string;
+  courseCount: number;
+  meetingCount: number;
+  addedCount: number;
+  skippedCount: number;
+  removedCount: number;
+}
 export interface ShiguangSchool { id: string; name: string; initial: string; resourceFolder: string; }
 export interface ShiguangAdapter { schoolId: string; schoolName: string; resourceFolder: string; adapterId: string; adapterName: string; category: string; assetJsPath: string; importUrl: string; maintainer: string; description: string; }
 export interface ShiguangImportStart { sessionId: string; adapterName: string; schoolName: string; sourceSha256: string; allowedHosts: string[]; insecureTransport: boolean; status: string; }
