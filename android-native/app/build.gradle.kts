@@ -45,6 +45,8 @@ android {
             assets.srcDir("../../dist")
             // Reuse the already-reviewed RemoteViews/XML resources during migration.
             res.srcDir("../../native/android/res")
+            // The Shiguang login Activity is already plain Android Kotlin and has no Tauri dependency.
+            java.srcDir("../../native/android/shiguang")
         }
     }
 
