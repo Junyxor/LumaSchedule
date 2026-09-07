@@ -28,9 +28,7 @@ android {
     }
 
     buildTypes {
-        debug {
-            isMinifyEnabled = false
-        }
+        debug { isMinifyEnabled = false }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -41,9 +39,9 @@ android {
 
     sourceSets {
         getByName("main") {
-            // Vite output is packaged directly; no second copy of the UI is generated.
+            // Vite output and the build-time synchronized adapter snapshot are packaged directly.
             assets.srcDir("../../dist")
-            // Reuse the already-reviewed RemoteViews/XML resources during migration.
+            assets.srcDir("../../vendor")
             res.srcDir("../../native/android/res")
             // The Shiguang login Activity is already plain Android Kotlin and has no Tauri dependency.
             java.srcDir("../../native/android/shiguang")
@@ -59,9 +57,7 @@ android {
         freeCompilerArgs += listOf("-Xno-call-assertions", "-Xno-param-assertions", "-Xno-receiver-assertions")
     }
 
-    buildFeatures {
-        buildConfig = true
-    }
+    buildFeatures { buildConfig = true }
 
     packaging {
         resources {
