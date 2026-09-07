@@ -39,6 +39,8 @@ jobs:
         with:
           gradle-version: '8.9'
       - run: npm install
+      - name: Validate Android SQLite API usage
+        run: node scripts/validate-android-sqlite-usage.mjs
       - name: Bundle current university adapters
         env:
           SHIGUANG_SOURCE: .upstream/shiguang_warehouse
@@ -102,6 +104,8 @@ jobs:
         with:
           gradle-version: '8.9'
       - run: npm install
+      - name: Validate Android SQLite API usage
+        run: node scripts/validate-android-sqlite-usage.mjs
       - name: Bundle current university adapters
         env:
           SHIGUANG_SOURCE: .upstream/shiguang_warehouse
