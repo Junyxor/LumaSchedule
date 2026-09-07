@@ -4,6 +4,8 @@ export interface Course { id: string; name: string; teacher: string; room: strin
 export interface CourseMutation { id?: string | null; name: string; teacher: string; room: string; day: number; startSection: number; endSection: number; start: string; end: string; weeks: number[]; }
 export interface ScheduleSnapshot { courses: Course[]; hasSchedule: boolean; termName?: string | null; termStart?: string | null; weekCount?: number | null; currentWeek?: number | null; }
 export interface GlassSettings { blur: number; opacity: number; saturation: number; highlight: number; refraction: number; noise: number; motion: boolean; }
+export interface CourseReminderSettings { enabled: boolean; offsetMinutes: number; }
+export interface ReminderSyncReport { enabled: boolean; futureCount: number; scheduledCount: number; cancelledCount: number; skippedCount: number; }
 export interface ImportedCourse { name: string; teacher?: string | null; location?: string | null; weekday: number; startSection: number; endSection: number; weeks: number[]; startTime?: string | null; endTime?: string | null; }
 export interface ImportBundle { source: string; termName?: string | null; termStart?: string | null; courses: ImportedCourse[]; metadata: Record<string, string>; }
 export interface ShiguangSchool { id: string; name: string; initial: string; resourceFolder: string; }
