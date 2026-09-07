@@ -1,5 +1,6 @@
 mod backup;
 mod db;
+mod schedule_view;
 mod shiguang;
 mod webdav;
 mod widget_plugin;
@@ -117,6 +118,7 @@ pub fn run() {
             import_schedule_text,
             commit_import_bundle,
             list_schedule_courses,
+            schedule_view::get_schedule_snapshot,
             export_latest_schedule_json,
             export_latest_schedule_ics,
             export_full_backup,
