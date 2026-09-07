@@ -39,16 +39,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          CARGO_TERM_COLOR: never
         run: |
           set +e
           cargo check -p lumaschedule 2>&1 | tee /tmp/luma-cargo-check.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ] && [ "${{ github.event_name }}" = "pull_request" ]; then
             {
-              echo '### `cargo check -p lumaschedule` diagnostics'
+              echo '### `cargo check -p lumaschedule` concise diagnostics'
               echo
               echo '```text'
-              tail -n 160 /tmp/luma-cargo-check.log
+              grep -E '^(error(\[[A-Z0-9]+\])?:|[[:space:]]*--> src-tauri/|[[:space:]]*\||help:|note: required)' /tmp/luma-cargo-check.log | tail -n 120
               echo '```'
             } > /tmp/luma-cargo-comment.md
             gh pr comment "$PR_NUMBER" --body-file /tmp/luma-cargo-comment.md || true
