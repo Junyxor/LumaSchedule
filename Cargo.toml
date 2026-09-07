@@ -7,9 +7,14 @@ members = [
   "src-tauri"
 ]
 
-# LumaSchedule is a small utility app: prefer compact release binaries over
-# maximum compiler throughput. Debug/profile tuning stays in CI so local
-# development still keeps useful symbols.
+# Keep test/dev binaries useful but do not ship hundreds of MB of Rust debug
+# symbols inside Android APKs. Backtraces still retain symbol names.
+[profile.dev]
+opt-level = 1
+debug = 0
+strip = "debuginfo"
+
+# LumaSchedule is a small utility app: prefer compact release binaries.
 [profile.release]
 opt-level = "s"
 lto = true
