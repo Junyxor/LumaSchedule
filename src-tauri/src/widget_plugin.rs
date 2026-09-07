@@ -73,7 +73,7 @@ pub struct ScheduleNativeBridge<R: Runtime> {
     #[cfg(target_os = "android")]
     handle: PluginHandle<R>,
     #[cfg(not(target_os = "android"))]
-    marker: PhantomData<R>,
+    marker: PhantomData<fn() -> R>,
 }
 
 impl<R: Runtime> ScheduleNativeBridge<R> {
