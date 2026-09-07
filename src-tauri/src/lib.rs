@@ -1,5 +1,7 @@
 mod backup;
 mod db;
+mod performance;
+mod reminders;
 mod schedule_view;
 mod shiguang;
 mod webdav;
@@ -118,6 +120,7 @@ pub fn run() {
             let config_dir = app.path().app_config_dir()?;
             std::fs::create_dir_all(&config_dir)?;
             let db = AppDb::open(&config_dir.join("lumaschedule.sqlite"))?;
+            performance::tune(&db).map_err(std::io::Error::other)?;
             app.manage(db);
             app.manage(shiguang::ShiguangRuntime::new().map_err(std::io::Error::other)?);
             Ok(())
@@ -144,6 +147,9 @@ pub fn run() {
             update_widget_snapshot,
             schedule_native_reminder,
             cancel_native_reminder,
+            reminders::get_course_reminder_settings,
+            reminders::save_course_reminder_settings,
+            reminders::sync_course_reminders,
             shiguang::shiguang_list_schools,
             shiguang::shiguang_list_adapters,
             shiguang::shiguang_start_import,
