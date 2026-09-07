@@ -108,7 +108,7 @@ export async function scheduleTestReminder(delayMs = 60_000) {
 
 export function listShiguangSchools(query = '') {
   return invokeNative<ShiguangSchool[]>('shiguang_list_schools', {
-    query: query || null
+    query: query.trim()
   });
 }
 
