@@ -1,0 +1,41 @@
+# Frontend
+node_modules/
+dist/
+.vite/
+
+# Rust
+/target/
+**/target/
+
+# Tauri generated mobile projects
+src-tauri/gen/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Signing / secrets
+*.jks
+*.keystore
+keystore.properties
+.env
+.env.*
+!.env.example
+
+# Local data
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Firebase / local credentials
+**/google-services.json
+**/GoogleService-Info.plist
+.env
+.env.*
+!.env.example
+
+# Adapter sync worktrees/cache
+.upstream/
+.cache/

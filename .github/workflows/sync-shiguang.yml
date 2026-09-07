@@ -1,0 +1,51 @@
+name: Sync Shiguang adapters
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * *'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sync-shiguang.yml'
+      - 'scripts/sync-shiguang-adapters.mjs'
+      - 'vendor/shiguang_warehouse/SNAPSHOT.json'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout LumaSchedule
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Checkout upstream adapter warehouse
+        uses: actions/checkout@v4
+        with:
+          repository: XingHeYuZhuan/shiguang_warehouse
+          ref: main
+          path: .upstream/shiguang_warehouse
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Mirror upstream adapters
+        env:
+          SHIGUANG_SOURCE: .upstream/shiguang_warehouse
+        run: node scripts/sync-shiguang-adapters.mjs
+      - name: Commit changed snapshot
+        shell: bash
+        run: |
+          git add vendor/shiguang_warehouse
+          if git diff --cached --quiet; then
+            echo 'Adapter snapshot is already current.'
+            exit 0
+          fi
+          REVISION="$(git -C .upstream/shiguang_warehouse rev-parse --short=12 HEAD)"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m "chore(adapters): sync shiguang warehouse @ ${REVISION} [skip ci]"
+          git push

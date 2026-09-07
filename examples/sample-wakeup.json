@@ -1,0 +1,28 @@
+[
+  {
+    "courseName": "高等数学",
+    "teacher": "陈老师",
+    "room": "教6-204",
+    "day": 1,
+    "startNode": 1,
+    "step": 2,
+    "startWeek": 1,
+    "endWeek": 16,
+    "type": 0,
+    "startTime": "08:30",
+    "endTime": "10:05"
+  },
+  {
+    "courseName": "量子信息导论",
+    "teacher": "李老师",
+    "room": "理学馆A302",
+    "day": 3,
+    "startNode": 3,
+    "step": 2,
+    "startWeek": 1,
+    "endWeek": 15,
+    "type": 1,
+    "startTime": "10:25",
+    "endTime": "12:00"
+  }
+]

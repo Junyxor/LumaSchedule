@@ -1,0 +1,277 @@
+package com.lumaschedule.app.shiguang
+
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.AlertDialog
+import android.graphics.Color
+import android.os.Bundle
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ProgressBar
+import android.widget.TextView
+import android.widget.Toast
+import org.json.JSONArray
+import java.io.ByteArrayInputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+
+class ShiguangImportActivity : Activity() {
+    private lateinit var webView: WebView
+    private lateinit var progress: ProgressBar
+    private lateinit var sessionId: String
+    private lateinit var adapterScript: String
+    private lateinit var adapterName: String
+    private lateinit var schoolName: String
+    private var allowedHosts: Set<String> = emptySet()
+    private var insecureTransport: Boolean = false
+
+    @SuppressLint("SetJavaScriptEnabled")
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        sessionId = intent.getStringExtra(EXTRA_SESSION_ID).orEmpty()
+        adapterScript = intent.getStringExtra(EXTRA_ADAPTER_SCRIPT).orEmpty()
+        adapterName = intent.getStringExtra(EXTRA_ADAPTER_NAME).orEmpty()
+        schoolName = intent.getStringExtra(EXTRA_SCHOOL_NAME).orEmpty()
+        allowedHosts = parseHosts(intent.getStringExtra(EXTRA_ALLOWED_HOSTS_JSON).orEmpty())
+        insecureTransport = intent.getBooleanExtra(EXTRA_INSECURE_TRANSPORT, false)
+        val importUrl = intent.getStringExtra(EXTRA_IMPORT_URL).orEmpty()
+        if (sessionId.isBlank() || adapterScript.isBlank() || importUrl.isBlank()) { finishWithError("拾光导入参数不完整"); return }
+
+        title = "$schoolName · $adapterName"
+        setContentView(buildUi())
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        prefs.edit().putString(key(sessionId, "status"), "running").putString(key(sessionId, "message"), "请完成教务系统登录，登录成功后会自动读取课表。").putString(key(sessionId, "adapter_name"), adapterName).putString(key(sessionId, "school_name"), schoolName).apply()
+
+        CookieManager.getInstance().setAcceptCookie(true)
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
+        webView.settings.javaScriptEnabled = true
+        webView.settings.domStorageEnabled = true
+        webView.settings.databaseEnabled = true
+        webView.settings.allowFileAccess = false
+        webView.settings.allowContentAccess = false
+        webView.settings.javaScriptCanOpenWindowsAutomatically = false
+        if (insecureTransport) webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        webView.addJavascriptInterface(Bridge(), "LumaShiguangBridge")
+        webView.webChromeClient = WebChromeClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+                val uri = request?.url ?: return false
+                val host = uri.host?.lowercase().orEmpty()
+                val allowedScheme = uri.scheme == "https" || (uri.scheme == "http" && insecureTransport)
+                if (!allowedScheme || !isHostAllowed(host)) {
+                    Toast.makeText(this@ShiguangImportActivity, "已阻止跳转到未声明域名：$host", Toast.LENGTH_LONG).show()
+                    return true
+                }
+                return false
+            }
+
+            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                val uri = request?.url ?: return blockedResponse()
+                val scheme = uri.scheme?.lowercase().orEmpty()
+                if (scheme in setOf("about", "data", "blob")) return null
+                val host = uri.host?.lowercase().orEmpty()
+                if ((scheme == "https" || (scheme == "http" && insecureTransport)) && isHostAllowed(host)) return null
+                return blockedResponse()
+            }
+
+            override fun onPageFinished(view: WebView, url: String?) {
+                super.onPageFinished(view, url)
+                progress.visibility = View.GONE
+                val host = runCatching { android.net.Uri.parse(url).host?.lowercase() }.getOrNull().orEmpty()
+                if (!isHostAllowed(host)) return
+                if (currentStatus() == "complete") return
+                view.evaluateJavascript(buildInjectionScript(), null)
+            }
+        }
+        webView.loadUrl(importUrl)
+    }
+
+    private fun buildUi(): LinearLayout {
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(246, 247, 251)) }
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(14.dp, 10.dp, 14.dp, 10.dp); setBackgroundColor(Color.WHITE) }
+        val back = Button(this).apply { text = "返回"; isAllCaps = false; setOnClickListener { handleBack() } }
+        val titleView = TextView(this).apply { text = "$schoolName  ·  $adapterName"; textSize = 15f; setTextColor(Color.rgb(42, 44, 55)); setPadding(12.dp, 0, 0, 0) }
+        progress = ProgressBar(this).apply { isIndeterminate = true }
+        bar.addView(back, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        bar.addView(titleView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        bar.addView(progress, LinearLayout.LayoutParams(24.dp, 24.dp))
+        webView = WebView(this)
+        root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        return root
+    }
+
+    private fun buildInjectionScript(): String = """
+(() => {
+  if (window.top !== window.self || window.__LUMA_SHIGUANG_BOOTSTRAPPED__) return;
+  window.__LUMA_SHIGUANG_BOOTSTRAPPED__ = true;
+  const nativeBridge = window.LumaShiguangBridge;
+  window.shiguangBridge = {
+    showToast(message) { nativeBridge.showToast(String(message)); },
+    notifyTaskCompletion() { nativeBridge.notifyTaskCompletion(); }
+  };
+  window.shiguangBridgePromise = {
+    async showAlert(title, message, confirmText) {
+      return !!nativeBridge.showAlert(String(title || ''), String(message || ''), String(confirmText || '确认'));
+    },
+    async showPrompt(title, tip, defaultText, validatorJsFunction) {
+      let current = String(defaultText || '');
+      while (true) {
+        const result = nativeBridge.showPrompt(String(title || ''), String(tip || ''), current);
+        if (result === null || result === undefined) return null;
+        const value = String(result);
+        if (!validatorJsFunction) return value;
+        try {
+          const validationResult = (0, eval)(String(validatorJsFunction) + '(' + JSON.stringify(value) + ')');
+          const resolved = validationResult && typeof validationResult.then === 'function' ? await validationResult : validationResult;
+          if (resolved === false || resolved === null || resolved === undefined || String(resolved).length === 0) return value;
+          nativeBridge.showToast(String(resolved));
+          current = value;
+        } catch (error) {
+          nativeBridge.showToast('输入校验器执行失败：' + String(error));
+          return value;
+        }
+      }
+    },
+    async showSingleSelection(title, optionsJson, defaultIndex) {
+      return nativeBridge.showSingleSelection(String(title || ''), String(optionsJson || '[]'), Number(defaultIndex ?? -1));
+    },
+    async saveImportedCourses(payload) { return !!nativeBridge.saveImportedCourses(String(payload || '[]')); },
+    async savePresetTimeSlots(payload) { return !!nativeBridge.savePresetTimeSlots(String(payload || '[]')); },
+    async saveCourseConfig(payload) { return !!nativeBridge.saveCourseConfig(String(payload || '{}')); }
+  };
+  window.AndroidBridgePromise = window.shiguangBridgePromise;
+  window.AndroidBridge = window.shiguangBridge;
+  window.addEventListener('unhandledrejection', event => nativeBridge.reportError(String(event.reason || 'adapter rejection')));
+  window.addEventListener('error', event => nativeBridge.reportError(String(event.error || event.message || 'adapter error')));
+
+$adapterScript
+})();
+""".trimIndent()
+
+    private inner class Bridge {
+        @JavascriptInterface
+        fun showToast(message: String) { runOnUiThread { Toast.makeText(this@ShiguangImportActivity, message, Toast.LENGTH_SHORT).show() } }
+
+        @JavascriptInterface
+        fun showAlert(title: String, message: String, confirmText: String): Boolean {
+            if (isFinishing) return false
+            val latch = CountDownLatch(1); var accepted = false
+            runOnUiThread {
+                val dialog = AlertDialog.Builder(this@ShiguangImportActivity).setTitle(title).setMessage(message)
+                    .setPositiveButton(confirmText.ifBlank { "确认" }) { _, _ -> accepted = true; latch.countDown() }
+                    .setNegativeButton("取消") { _, _ -> accepted = false; latch.countDown() }
+                    .setOnCancelListener { accepted = false; latch.countDown() }.create()
+                dialog.show()
+            }
+            latch.await(10, TimeUnit.MINUTES); return accepted
+        }
+
+        @JavascriptInterface
+        fun showPrompt(title: String, tip: String, defaultText: String): String? {
+            if (isFinishing) return null
+            val latch = CountDownLatch(1); var result: String? = null
+            runOnUiThread {
+                val input = EditText(this@ShiguangImportActivity).apply { setText(defaultText); setSelection(text.length); setSingleLine(false); minLines = 1; maxLines = 5; setPadding(20.dp, 12.dp, 20.dp, 12.dp) }
+                val dialog = AlertDialog.Builder(this@ShiguangImportActivity).setTitle(title).setMessage(tip).setView(input)
+                    .setPositiveButton("确认") { _, _ -> result = input.text?.toString() ?: ""; latch.countDown() }
+                    .setNegativeButton("取消") { _, _ -> result = null; latch.countDown() }
+                    .setOnCancelListener { result = null; latch.countDown() }.create()
+                dialog.show()
+            }
+            latch.await(10, TimeUnit.MINUTES); return result
+        }
+
+        @JavascriptInterface
+        fun showSingleSelection(title: String, optionsJson: String, defaultIndex: Int): Int {
+            if (isFinishing) return -1
+            val optionsArray = runCatching { JSONArray(optionsJson) }.getOrNull() ?: return -1
+            val options = Array(optionsArray.length()) { index -> optionsArray.optString(index, "选项 ${index + 1}") }
+            if (options.isEmpty()) return -1
+            val latch = CountDownLatch(1); var selected = -1; val checked = defaultIndex.takeIf { it in options.indices } ?: -1
+            runOnUiThread {
+                val dialog = AlertDialog.Builder(this@ShiguangImportActivity).setTitle(title)
+                    .setSingleChoiceItems(options, checked) { d, which -> selected = which; d.dismiss(); latch.countDown() }
+                    .setNegativeButton("取消") { _, _ -> selected = -1; latch.countDown() }
+                    .setOnCancelListener { selected = -1; latch.countDown() }.create()
+                dialog.show()
+            }
+            latch.await(10, TimeUnit.MINUTES); return selected
+        }
+
+        @JavascriptInterface
+        fun saveImportedCourses(payload: String): Boolean { save("courses", payload); save("status", "collecting"); save("message", "课程已经读取，正在整理学期与作息信息。"); return true }
+        @JavascriptInterface
+        fun savePresetTimeSlots(payload: String): Boolean { save("time_slots", payload); return true }
+        @JavascriptInterface
+        fun saveCourseConfig(payload: String): Boolean { save("config", payload); return true }
+        @JavascriptInterface
+        fun notifyTaskCompletion() {
+            save("status", "complete"); save("message", "教务课程读取完成，返回 LumaSchedule 确认导入。")
+            runOnUiThread { Toast.makeText(this@ShiguangImportActivity, "课表读取完成", Toast.LENGTH_SHORT).show(); webView.postDelayed({ finish() }, 650) }
+        }
+        @JavascriptInterface
+        fun reportError(message: String) { if (currentStatus() == "complete") return; save("status", "error"); save("message", message.take(1000)) }
+        private fun save(field: String, value: String) { getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(key(sessionId, field), value).apply() }
+    }
+
+    private fun blockedResponse(): WebResourceResponse = WebResourceResponse("text/plain", "utf-8", 403, "Blocked by LumaSchedule adapter sandbox", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream(ByteArray(0)))
+    private fun currentStatus(): String = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(key(sessionId, "status"), "running") ?: "running"
+
+    private fun finishWithError(message: String) {
+        if (::sessionId.isInitialized && sessionId.isNotBlank()) getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(key(sessionId, "status"), "error").putString(key(sessionId, "message"), message).apply()
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show(); finish()
+    }
+
+    private fun handleBack() { if (::webView.isInitialized && webView.canGoBack()) webView.goBack() else finish() }
+    @Deprecated("Deprecated in Java") override fun onBackPressed() = handleBack()
+    override fun onDestroy() { if (::webView.isInitialized) { webView.removeJavascriptInterface("LumaShiguangBridge"); webView.stopLoading(); webView.destroy() }; super.onDestroy() }
+
+    private fun isHostAllowed(host: String): Boolean {
+        val normalized = host.trim().trimEnd('.').lowercase(); if (normalized in allowedHosts) return true
+        return allowedHosts.any { seed -> sharesInstitutionScope(seed, normalized) }
+    }
+
+    private fun sharesInstitutionScope(seed: String, candidate: String): Boolean {
+        if (seed.equals(candidate, ignoreCase = true)) return true
+        val scope = institutionScope(seed); return candidate == scope || candidate.endsWith(".$scope")
+    }
+
+    private fun institutionScope(host: String): String {
+        val normalized = host.trim().trimEnd('.').lowercase()
+        if (normalized.matches(Regex("^\\d{1,3}(\\.\\d{1,3}){3}$"))) return normalized
+        val labels = normalized.split('.').filter { it.isNotBlank() }; if (labels.size < 2) return normalized
+        val cnSecondLevel = labels.last() == "cn" && labels.getOrNull(labels.size - 2) in setOf("edu", "com", "net", "org", "gov", "ac")
+        val keep = if (cnSecondLevel && labels.size >= 3) 3 else 2; return labels.takeLast(keep).joinToString(".")
+    }
+
+    private fun parseHosts(raw: String): Set<String> = runCatching {
+        val json = JSONArray(raw); buildSet { for (index in 0 until json.length()) json.optString(index).trim().lowercase().takeIf { it.isNotEmpty() }?.let(::add) }
+    }.getOrDefault(emptySet())
+
+    private val Int.dp: Int get() = (this * resources.displayMetrics.density).toInt()
+
+    companion object {
+        const val PREFS_NAME = "luma_shiguang_import"
+        const val EXTRA_SESSION_ID = "session_id"
+        const val EXTRA_IMPORT_URL = "import_url"
+        const val EXTRA_ADAPTER_SCRIPT = "adapter_script"
+        const val EXTRA_ALLOWED_HOSTS_JSON = "allowed_hosts_json"
+        const val EXTRA_ADAPTER_NAME = "adapter_name"
+        const val EXTRA_SCHOOL_NAME = "school_name"
+        const val EXTRA_INSECURE_TRANSPORT = "insecure_transport"
+        fun key(sessionId: String, field: String) = "$sessionId.$field"
+    }
+}
