@@ -73,9 +73,15 @@ pub fn get_schedule_snapshot(db: State<'_, AppDb>) -> Result<ScheduleSnapshot, S
         }
     }
 
+    let display_term_name = if term_name.trim().is_empty() || term_name.trim() == "导入学期" {
+        None
+    } else {
+        Some(term_name)
+    };
+
     Ok(ScheduleSnapshot {
         courses,
-        term_name: Some(term_name),
+        term_name: display_term_name,
         term_start: (!term_start.trim().is_empty()).then_some(term_start),
         week_count: Some(week_count),
         current_week,
@@ -114,9 +120,7 @@ fn slot_time(value: &Value, section: u8, start: bool) -> Option<String> {
         .or_else(|| value.get("slots").and_then(Value::as_array))
         .or_else(|| value.get("sections").and_then(Value::as_array))?;
 
-    let item = slots.iter().find(|slot| {
-        slot_number(slot).is_some_and(|number| number == section)
-    })?;
+    let item = slots.iter().find(|slot| slot_number(slot).is_some_and(|number| number == section))?;
 
     let keys: &[&str] = if start {
         &["startTime", "start_time", "start"]
