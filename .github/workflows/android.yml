@@ -1,4 +1,4 @@
-name: Android
+name: Android Native
 
 on:
   push:
@@ -29,37 +29,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-      - name: Android SDK / NDK
-        run: yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
-      - name: Export NDK_HOME
-        run: echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
+      - run: yes | sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          targets: aarch64-linux-android
-      - uses: Swatinem/rust-cache@v2
+          gradle-version: '8.9'
       - run: npm install
       - name: Bundle current university adapters
         env:
           SHIGUANG_SOURCE: .upstream/shiguang_warehouse
         run: node scripts/sync-shiguang-adapters.mjs
-      - run: npx tauri android init --ci --skip-targets-install
-      - run: npx tauri icon assets/app-icon.svg
-      - name: Restore optional Firebase Android config
-        env:
-          FIREBASE_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}
-        shell: bash
-        run: |
-          if [ -z "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" ]; then
-            echo "Firebase Android config not configured; continuing without google-services.json."
-            exit 0
-          fi
-          printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > src-tauri/gen/android/app/google-services.json
-          test -s src-tauri/gen/android/app/google-services.json || (echo "::error::Decoded google-services.json is empty" && exit 1)
+      - name: Build Svelte assets
+        run: npm run build
       - name: Create ephemeral test signing key
         shell: bash
         run: |
@@ -70,25 +56,22 @@ jobs:
             -alias lumaschedule-test \
             -keyalg RSA -keysize 2048 -validity 3650 \
             -dname "CN=LumaSchedule Test, OU=CI, O=LumaSchedule, L=Guangzhou, ST=Guangdong, C=CN"
-          cat > src-tauri/gen/android/keystore.properties <<EOF2
-          keyAlias=lumaschedule-test
-          keyPassword=lumaschedule-test
-          storePassword=lumaschedule-test
-          storeFile=$RUNNER_TEMP/lumaschedule-test.jks
-          EOF2
-      - run: node scripts/prepare-android-ci.mjs --signing --shrink
-      - name: Build compact arm64 test Release APK
-        run: npx tauri android build --apk --target aarch64 --ci
+      - name: Build native Release APK
+        env:
+          LUMA_KEYSTORE_PATH: ${{ runner.temp }}/lumaschedule-test.jks
+          LUMA_KEY_ALIAS: lumaschedule-test
+          LUMA_KEY_PASSWORD: lumaschedule-test
+          LUMA_STORE_PASSWORD: lumaschedule-test
+        run: gradle -p android-native :app:assembleRelease --no-daemon --stacktrace
       - name: Report APK size
         shell: bash
         run: |
-          echo "Compact test APK(s):"
-          find src-tauri/gen/android/app/build/outputs -name '*.apk' -type f -print0 | xargs -0 -r ls -lh
-          find src-tauri/gen/android/app/build/outputs -name '*.apk' -type f -printf '%p %s bytes\n'
+          find android-native/app/build/outputs/apk -name '*.apk' -type f -print0 | xargs -0 -r ls -lh
+          find android-native/app/build/outputs/apk -name '*.apk' -type f -printf '%p %s bytes\n'
       - uses: actions/upload-artifact@v4
         with:
-          name: lumaschedule-android-arm64-test-release
-          path: src-tauri/gen/android/app/build/outputs/**/*.apk
+          name: lumaschedule-android-native-test-release
+          path: android-native/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
 
   signed-release:
@@ -106,37 +89,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-      - name: Android SDK / NDK
-        run: yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
-      - name: Export NDK_HOME
-        run: echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
+      - run: yes | sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          targets: aarch64-linux-android
-      - uses: Swatinem/rust-cache@v2
+          gradle-version: '8.9'
       - run: npm install
       - name: Bundle current university adapters
         env:
           SHIGUANG_SOURCE: .upstream/shiguang_warehouse
         run: node scripts/sync-shiguang-adapters.mjs
-      - run: npx tauri android init --ci --skip-targets-install
-      - run: npx tauri icon assets/app-icon.svg
-      - name: Restore optional Firebase Android config
-        env:
-          FIREBASE_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}
-        shell: bash
-        run: |
-          if [ -z "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" ]; then
-            echo "Firebase Android config not configured; continuing without google-services.json."
-            exit 0
-          fi
-          printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > src-tauri/gen/android/app/google-services.json
-          test -s src-tauri/gen/android/app/google-services.json || (echo "::error::Decoded google-services.json is empty" && exit 1)
+      - run: npm run build
       - name: Restore Android signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -151,23 +119,21 @@ jobs:
           test -n "$STORE_PASSWORD" || (echo "::error::ANDROID_STORE_PASSWORD is missing" && exit 1)
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/lumaschedule-release.jks"
           test -s "$RUNNER_TEMP/lumaschedule-release.jks" || (echo "::error::Decoded Android keystore is empty" && exit 1)
-          cat > src-tauri/gen/android/keystore.properties <<EOF2
-          keyAlias=$KEY_ALIAS
-          keyPassword=$KEY_PASSWORD
-          storePassword=$STORE_PASSWORD
-          storeFile=$RUNNER_TEMP/lumaschedule-release.jks
-          EOF2
-      - run: node scripts/prepare-android-ci.mjs --signing --shrink
-      - name: Build optimized arm64 Release APK/AAB
-        run: npx tauri android build --apk --aab --target aarch64 --ci
+      - name: Build signed native APK and AAB
+        env:
+          LUMA_KEYSTORE_PATH: ${{ runner.temp }}/lumaschedule-release.jks
+          LUMA_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          LUMA_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          LUMA_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: gradle -p android-native :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace
       - name: Report release sizes
         shell: bash
         run: |
-          find src-tauri/gen/android/app/build/outputs \( -name '*.apk' -o -name '*.aab' \) -type f -print0 | xargs -0 -r ls -lh
+          find android-native/app/build/outputs \( -name '*.apk' -o -name '*.aab' \) -type f -print0 | xargs -0 -r ls -lh
       - uses: actions/upload-artifact@v4
         with:
-          name: lumaschedule-android-arm64-release
+          name: lumaschedule-android-native-release
           path: |
-            src-tauri/gen/android/app/build/outputs/**/*.apk
-            src-tauri/gen/android/app/build/outputs/**/*.aab
+            android-native/app/build/outputs/apk/release/*.apk
+            android-native/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
