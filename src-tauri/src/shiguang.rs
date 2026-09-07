@@ -21,6 +21,7 @@ pub struct ShiguangSchool {
     pub id: String,
     pub name: String,
     pub initial: String,
+    #[serde(rename = "resourceFolder", alias = "resource_folder", default)]
     pub resource_folder: String,
 }
 
@@ -156,6 +157,11 @@ impl ShiguangRuntime {
         if let Some(cached) = self.schools_cache.lock().map_err(|_| "shiguang school cache poisoned".to_string())?.clone() { return Ok(cached); }
         let raw = self.warehouse_text(app, "index/root_index.yaml").await?;
         let mut index: RootIndex = serde_yaml::from_str(&raw).map_err(|error| format!("拾光根索引解析失败: {error}"))?;
+        for school in &mut index.schools {
+            if school.resource_folder.trim().is_empty() {
+                school.resource_folder = school.id.clone();
+            }
+        }
         index.schools.sort_by(|a, b| a.initial.cmp(&b.initial).then_with(|| a.name.cmp(&b.name)));
         *self.schools_cache.lock().map_err(|_| "shiguang school cache poisoned".to_string())? = Some(index.schools.clone());
         Ok(index.schools)
@@ -218,85 +224,74 @@ pub async fn shiguang_start_import<R: Runtime>(app: AppHandle<R>, state: State<'
 
     #[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
     {
-        let injection = desktop_injection_script(&session_id, &adapter_script)?;
-        let allowed = allowed_hosts.iter().cloned().collect::<HashSet<_>>();
+        let url = Url::parse(&adapter.import_url).map_err(|e| e.to_string())?;
+        let script = desktop_injection_script(&session_id, &adapter_script)?;
+        let allowed = allowed_hosts.clone();
         let allow_http = insecure_transport;
-        let import_url = Url::parse(&adapter.import_url).map_err(|error| error.to_string())?;
-        tauri::WebviewWindowBuilder::new(&app, &window_label, tauri::WebviewUrl::External(import_url))
+        tauri::WebviewWindowBuilder::new(&app, &window_label, tauri::WebviewUrl::External(url))
             .title(format!("{} · {}", adapter.school_name, adapter.adapter_name))
-            .inner_size(520.0, 820.0).min_inner_size(390.0, 560.0).initialization_script(injection)
+            .inner_size(1120.0, 760.0)
+            .initialization_script(&script)
             .on_navigation(move |url| {
-                if matches!(url.scheme(), "about" | "data") { return true; }
-                matches!(url.scheme(), "https" | "http") && (url.scheme() == "https" || allow_http) && url.host_str().is_some_and(|host| {
-                    let host = host.to_ascii_lowercase();
-                    allowed.contains(&host) || allowed.iter().any(|seed| hosts_share_scope(seed, &host))
-                })
-            }).build().map_err(|error| format!("无法打开教务登录窗口: {error}"))?;
-        state.sessions.lock().map_err(|_| "shiguang session lock poisoned".to_string())?.insert(session_id.clone(), DesktopSession {
-            adapter: adapter.clone(), window_label: window_label.clone(), status: "running".into(),
-            message: Some("请在教务登录窗口完成登录，登录后适配器会自动读取课程。".into()), courses: None, time_slots: None, config: None,
+                let scheme = url.scheme();
+                let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+                (scheme == "https" || (allow_http && scheme == "http")) && allowed.iter().any(|value| host == *value || host.ends_with(&format!(".{value}")))
+            })
+            .build().map_err(|e| e.to_string())?;
+        state.sessions.lock().map_err(|_| "session lock poisoned".to_string())?.insert(session_id.clone(), DesktopSession {
+            adapter: adapter.clone(), window_label, status: "running".into(), message: Some("请在教务系统中完成登录。".into()), courses: None, time_slots: None, config: None,
         });
     }
-
-    #[cfg(target_os = "ios")]
-    { let _ = (&app, &window_label, &adapter_script); return Err("iOS 教务网页登录运行时将在 WidgetKit 阶段接入；当前先完成 Android/desktop。".into()); }
 
     Ok(ShiguangImportStart { session_id, adapter_name: adapter.adapter_name, school_name: adapter.school_name, source_sha256, allowed_hosts, insecure_transport, status: "running".into() })
 }
 
 #[tauri::command]
-pub fn shiguang_bridge(state: State<'_, ShiguangRuntime>, request: ShiguangBridgeRequest) -> Result<Value, String> {
-    let mut sessions = state.sessions.lock().map_err(|_| "shiguang session lock poisoned".to_string())?;
-    let session = sessions.get_mut(&request.session_id).ok_or_else(|| "无效或已过期的拾光导入会话".to_string())?;
+pub async fn shiguang_bridge(state: State<'_, ShiguangRuntime>, request: ShiguangBridgeRequest) -> Result<Value, String> {
+    let mut sessions = state.sessions.lock().map_err(|_| "session lock poisoned".to_string())?;
+    let session = sessions.get_mut(&request.session_id).ok_or_else(|| "无效或已结束的适配器会话".to_string())?;
     match request.op.as_str() {
         "save_imported_courses" => {
-            let payload = request.payload.ok_or_else(|| "缺少课程数据".to_string())?;
-            let courses: Vec<ShiguangCourse> = serde_json::from_str(&payload).map_err(|error| format!("拾光课程数据解析失败: {error}"))?;
-            session.courses = Some(courses); session.status = "collecting".into(); session.message = Some("课程已读取，正在整理作息与学期配置。".into()); Ok(json!(true))
+            let payload = request.payload.as_deref().unwrap_or("[]");
+            session.courses = Some(serde_json::from_str(payload).map_err(|e| format!("课程解析失败: {e}"))?);
+            session.status = "collecting".into(); session.message = Some("课程已经读取，正在整理学期与作息信息。".into()); Ok(json!({"ok":true}))
         }
-        "save_preset_time_slots" => { let payload = request.payload.ok_or_else(|| "缺少作息数据".to_string())?; session.time_slots = Some(serde_json::from_str(&payload).map_err(|e| e.to_string())?); Ok(json!(true)) }
-        "save_course_config" => { let payload = request.payload.ok_or_else(|| "缺少课表配置".to_string())?; session.config = Some(serde_json::from_str(&payload).map_err(|e| e.to_string())?); Ok(json!(true)) }
-        "complete" => {
-            if session.courses.as_ref().is_none_or(Vec::is_empty) { return Err("适配器结束了任务，但没有返回课程".to_string()); }
-            session.status = "complete".into(); session.message = Some("教务课程读取完成，等待你在 LumaSchedule 中确认导入。".into()); Ok(json!(true))
-        }
-        "report_error" => { session.status = "error".into(); session.message = request.payload; Ok(json!(true)) }
-        _ => Err(format!("不支持的拾光 Bridge 操作: {}", request.op)),
+        "save_preset_time_slots" => { session.time_slots = request.payload.as_deref().and_then(|raw| serde_json::from_str(raw).ok()); Ok(json!({"ok":true})) }
+        "save_course_config" => { session.config = request.payload.as_deref().and_then(|raw| serde_json::from_str(raw).ok()); Ok(json!({"ok":true})) }
+        "complete" => { session.status = "complete".into(); session.message = Some("课程读取完成。".into()); Ok(json!({"ok":true})) }
+        "report_error" => { session.status = "error".into(); session.message = request.payload; Ok(json!({"ok":true})) }
+        _ => Err("未知的拾光 Bridge 操作".into()),
     }
 }
 
 #[tauri::command]
-pub fn shiguang_get_session<R: Runtime>(app: AppHandle<R>, state: State<'_, ShiguangRuntime>, session_id: String) -> Result<ShiguangSessionSnapshot, String> {
+pub async fn shiguang_get_session<R: Runtime>(app: AppHandle<R>, state: State<'_, ShiguangRuntime>, session_id: String) -> Result<ShiguangSessionSnapshot, String> {
     #[cfg(target_os = "android")]
     {
         let native = widget_plugin::get_shiguang_result(&app, widget_plugin::NativeShiguangResultRequest { session_id: session_id.clone() })?;
-        let adapter_name = native.adapter_name.unwrap_or_else(|| "拾光适配器".into());
-        let school_name = native.school_name.unwrap_or_default();
-        let courses = native.courses_json.as_deref().filter(|v| !v.is_empty()).map(serde_json::from_str::<Vec<ShiguangCourse>>).transpose().map_err(|e| e.to_string())?;
-        let time_slots = native.time_slots_json.as_deref().filter(|v| !v.is_empty()).map(serde_json::from_str::<Value>).transpose().map_err(|e| e.to_string())?;
-        let config = native.config_json.as_deref().filter(|v| !v.is_empty()).map(serde_json::from_str::<Value>).transpose().map_err(|e| e.to_string())?;
-        let bundle = courses.as_ref().map(|courses| build_bundle(&adapter_name, &school_name, courses, time_slots.as_ref(), config.as_ref()));
-        return Ok(ShiguangSessionSnapshot { session_id, adapter_name, school_name, status: native.status, message: native.message, bundle, time_slots, config });
+        let courses = native.courses_json.as_deref().and_then(|raw| serde_json::from_str::<Vec<ShiguangCourse>>(raw).ok());
+        let time_slots = native.time_slots_json.as_deref().and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+        let config = native.config_json.as_deref().and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+        let bundle = if native.status == "complete" { courses.as_ref().map(|courses| build_bundle(&native.adapter_name, &native.school_name, courses, time_slots.as_ref(), config.as_ref())) } else { None };
+        return Ok(ShiguangSessionSnapshot { session_id, adapter_name: native.adapter_name, school_name: native.school_name, status: native.status, message: native.message, bundle, time_slots, config });
     }
+
     #[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
     {
-        let sessions = state.sessions.lock().map_err(|_| "shiguang session lock poisoned".to_string())?;
-        let session = sessions.get(&session_id).ok_or_else(|| "找不到拾光导入会话".to_string())?;
-        let bundle = session.courses.as_ref().map(|courses| build_bundle(&session.adapter.adapter_name, &session.adapter.school_name, courses, session.time_slots.as_ref(), session.config.as_ref()));
+        let sessions = state.sessions.lock().map_err(|_| "session lock poisoned".to_string())?;
+        let session = sessions.get(&session_id).ok_or_else(|| "适配器会话不存在".to_string())?;
+        let bundle = if session.status == "complete" { session.courses.as_ref().map(|courses| build_bundle(&session.adapter.adapter_name, &session.adapter.school_name, courses, session.time_slots.as_ref(), session.config.as_ref())) } else { None };
         return Ok(ShiguangSessionSnapshot { session_id, adapter_name: session.adapter.adapter_name.clone(), school_name: session.adapter.school_name.clone(), status: session.status.clone(), message: session.message.clone(), bundle, time_slots: session.time_slots.clone(), config: session.config.clone() });
     }
+
     #[cfg(target_os = "ios")]
-    { let _ = (&app, &state, &session_id); Err("iOS 拾光导入运行时尚未启用".into()) }
+    Err("iOS 拾光原生导入运行时尚未实现".to_string())
 }
 
 #[tauri::command]
-pub fn shiguang_close_session<R: Runtime>(app: AppHandle<R>, state: State<'_, ShiguangRuntime>, session_id: String) -> Result<(), String> {
+pub async fn shiguang_close_session<R: Runtime>(app: AppHandle<R>, state: State<'_, ShiguangRuntime>, session_id: String) -> Result<(), String> {
     #[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
-    {
-        if let Some(session) = state.sessions.lock().map_err(|_| "shiguang session lock poisoned".to_string())?.remove(&session_id) {
-            if let Some(window) = app.get_webview_window(&session.window_label) { let _ = window.close(); }
-        }
-    }
+    if let Some(session) = state.sessions.lock().map_err(|_| "session lock poisoned".to_string())?.remove(&session_id) { if let Some(window) = app.get_webview_window(&session.window_label) { let _ = window.close(); } }
     #[cfg(target_os = "android")]
     { let _ = state; let _ = widget_plugin::clear_shiguang_session(&app, widget_plugin::NativeShiguangResultRequest { session_id })?; }
     Ok(())
@@ -417,4 +412,28 @@ fn desktop_injection_script(session_id: &str, adapter_script: &str) -> Result<St
 {adapter_script}
 }})();
 "#))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn school_index_accepts_snake_case_resource_folder() {
+        let raw = r#"
+schools:
+  - id: "GDUT"
+    name: "广东工业大学"
+    initial: "G"
+    resource_folder: "GDUT"
+"#;
+        let index: RootIndex = serde_yaml::from_str(raw).expect("snake_case Shiguang index should parse");
+        assert_eq!(index.schools[0].resource_folder, "GDUT");
+    }
+
+    #[test]
+    fn institutional_subdomains_share_scope() {
+        assert!(hosts_share_scope("jxfw.gdut.edu.cn", "authserver.gdut.edu.cn"));
+        assert!(!hosts_share_scope("gdut.edu.cn", "example.com"));
+    }
 }
