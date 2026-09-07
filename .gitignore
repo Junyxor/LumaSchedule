@@ -3,12 +3,13 @@ node_modules/
 dist/
 .vite/
 
-# Rust
-/target/
-**/target/
-
-# Tauri generated mobile projects
-src-tauri/gen/
+# Android / Gradle
+.gradle/
+android-native/.gradle/
+android-native/build/
+android-native/app/build/
+local.properties
+android-native/local.properties
 
 # IDE / OS
 .idea/
@@ -32,9 +33,6 @@ keystore.properties
 # Firebase / local credentials
 **/google-services.json
 **/GoogleService-Info.plist
-.env
-.env.*
-!.env.example
 
 # Adapter sync worktrees/cache
 .upstream/
