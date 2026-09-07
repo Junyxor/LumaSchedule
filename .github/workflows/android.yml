@@ -40,7 +40,7 @@ jobs:
         run: echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
       - run: npm install
       - name: Bundle current university adapters
@@ -61,10 +61,15 @@ jobs:
           printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > src-tauri/gen/android/app/google-services.json
           test -s src-tauri/gen/android/app/google-services.json || (echo "::error::Decoded google-services.json is empty" && exit 1)
       - run: node scripts/prepare-android-ci.mjs
-      - run: npx tauri android build --debug --apk --ci
+      - name: Build compact arm64 debug APK
+        run: npx tauri android build --debug --apk --target aarch64 --ci
+      - name: Report APK size
+        shell: bash
+        run: |
+          find src-tauri/gen/android/app/build/outputs -name '*.apk' -type f -print0 | xargs -0 -r ls -lh
       - uses: actions/upload-artifact@v4
         with:
-          name: lumaschedule-android-debug
+          name: lumaschedule-android-arm64-debug
           path: src-tauri/gen/android/app/build/outputs/**/*.apk
           if-no-files-found: error
 
@@ -94,7 +99,7 @@ jobs:
         run: echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
       - run: npm install
       - name: Bundle current university adapters
@@ -135,10 +140,15 @@ jobs:
           storeFile=$RUNNER_TEMP/lumaschedule-release.jks
           EOF2
       - run: node scripts/prepare-android-ci.mjs --signing
-      - run: npx tauri android build --apk --aab --ci
+      - name: Build optimized arm64 Release APK/AAB
+        run: npx tauri android build --apk --aab --target aarch64 --ci
+      - name: Report release sizes
+        shell: bash
+        run: |
+          find src-tauri/gen/android/app/build/outputs \( -name '*.apk' -o -name '*.aab' \) -type f -print0 | xargs -0 -r ls -lh
       - uses: actions/upload-artifact@v4
         with:
-          name: lumaschedule-android-release
+          name: lumaschedule-android-arm64-release
           path: |
             src-tauri/gen/android/app/build/outputs/**/*.apk
             src-tauri/gen/android/app/build/outputs/**/*.aab
