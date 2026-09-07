@@ -20,8 +20,8 @@ function unquote(value) {
   return text;
 }
 
-function field(block, key) {
-  const match = block.match(new RegExp(`^\\s*${key}:\\s*(.+?)\\s*$`, 'm'));
+function field(text, key) {
+  const match = text.match(new RegExp(`^\\s*${key}:\\s*(.+?)\\s*$`, 'm'));
   return match ? unquote(match[1].replace(/\s+#.*$/, '')) : '';
 }
 
@@ -32,26 +32,29 @@ requireFile(rootIndexPath, 'Shiguang root index');
 requireFile(manifestPath, 'GDUT adapter manifest');
 
 const rootIndex = fs.readFileSync(rootIndexPath, 'utf8');
-const gdutSchool = rootIndex.match(/(?:^|\n)\s*-\s+id:\s*["']?GDUT["']?[\s\S]*?(?=\n\s*-\s+id:|$)/m)?.[0] ?? '';
-if (!gdutSchool) throw new Error('Upstream Shiguang snapshot no longer exposes school GDUT.');
-if (!/name:\s*["']?广东工业大学["']?/m.test(gdutSchool)) {
-  throw new Error('GDUT school entry no longer carries 广东工业大学 as its display name.');
+if (!/^\s*-\s+id:\s*["']?GDUT["']?\s*$/m.test(rootIndex)) {
+  throw new Error('Upstream Shiguang snapshot no longer exposes school GDUT.');
 }
-if (!/resource_folder:\s*["']?GDUT["']?/m.test(gdutSchool)) {
-  throw new Error('GDUT school entry changed its resource_folder unexpectedly.');
+if (!/^\s*name:\s*["']?广东工业大学["']?\s*$/m.test(rootIndex)) {
+  throw new Error('Upstream Shiguang snapshot no longer exposes 广东工业大学 by that display name.');
+}
+if (!/^\s*resource_folder:\s*["']?GDUT["']?\s*$/m.test(rootIndex)) {
+  throw new Error('GDUT resource_folder changed unexpectedly.');
 }
 
 const manifest = fs.readFileSync(manifestPath, 'utf8');
-const adapter = manifest.match(/(?:^|\n)\s*-\s+adapter_id:\s*["']?GDUT_01["']?[\s\S]*?(?=\n\s*-\s+adapter_id:|$)/m)?.[0] ?? '';
-if (!adapter) throw new Error('GDUT adapter manifest no longer contains GDUT_01.');
+if (!/^\s*-\s+adapter_id:\s*["']?GDUT_01["']?\s*$/m.test(manifest)) {
+  throw new Error('GDUT adapter manifest no longer contains GDUT_01.');
+}
 
-const asset = field(adapter, 'asset_js_path');
-const importUrl = field(adapter, 'import_url');
+const asset = field(manifest, 'asset_js_path');
+const importUrl = field(manifest, 'import_url');
 if (!asset) throw new Error('GDUT_01 has no asset_js_path.');
 if (!importUrl) throw new Error('GDUT_01 has no import_url.');
 
 const scriptPath = path.resolve(gdutDir, asset);
-if (!scriptPath.startsWith(`${path.resolve(gdutDir)}${path.sep}`)) {
+const gdutBase = path.resolve(gdutDir);
+if (!(scriptPath === gdutBase || scriptPath.startsWith(`${gdutBase}${path.sep}`))) {
   throw new Error(`GDUT_01 asset path escapes its resource directory: ${asset}`);
 }
 requireFile(scriptPath, 'GDUT_01 adapter script');
@@ -78,7 +81,9 @@ const requiredCalls = [
   'shiguangBridge.notifyTaskCompletion'
 ];
 for (const call of requiredCalls) {
-  if (!source.includes(call)) throw new Error(`GDUT_01 no longer calls ${call}; re-check LumaSchedule bridge compatibility.`);
+  if (!source.includes(call)) {
+    throw new Error(`GDUT_01 no longer calls ${call}; re-check LumaSchedule bridge compatibility.`);
+  }
 }
 if (!source.includes('https://jxfw.gdut.edu.cn')) {
   throw new Error('GDUT_01 no longer references jxfw.gdut.edu.cn.');
