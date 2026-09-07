@@ -1,0 +1,7 @@
+.settings-actions button:hover { transform:translateY(-1px); }
+.settings-actions button:disabled,.setting-row:disabled { opacity:.5; cursor:not-allowed; }
+.settings-actions .danger-soft { color:#b35864; background:rgba(194,77,94,.055); }
+.settings-status { margin-top:11px; padding:9px 11px; border-radius:12px; background:rgba(98,91,205,.07); color:#6963bd; font-size:9px; line-height:1.5; overflow-wrap:anywhere; }
+.settings-status.compact { margin:10px 0 7px; }
+@media (max-width:760px) { .webdav-pair { grid-template-columns:1fr; } .settings-actions button { flex:1; justify-content:center; } }
+@media (prefers-color-scheme: dark) { .webdav-form input { background:rgba(255,255,255,.035); } .settings-status { background:rgba(118,108,224,.10); color:#b8b3ff; } }

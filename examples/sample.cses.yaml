@@ -1,0 +1,21 @@
+version: 1
+subjects:
+  - name: C语言程序设计
+    simplified_name: C
+    teacher: 林老师
+    room: 实验4-302
+  - name: 大学英语
+    simplified_name: 英
+    teacher: 周老师
+    room: 教3-106
+schedules:
+  - name: 星期一
+    enable_day: 1
+    weeks: all
+    classes:
+      - subject: C语言程序设计
+        start_time: "10:25:00"
+        end_time: "12:00:00"
+      - subject: 大学英语
+        start_time: "13:50:00"
+        end_time: "15:25:00"

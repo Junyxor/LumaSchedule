@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/remote-schema.json",
+  "identifier": "shiguang-remote",
+  "description": "Narrow IPC boundary for sandboxed Shiguang teaching-system import windows. Runtime navigation is separately restricted to adapter-declared institutional hosts.",
+  "windows": ["adapter-*"],
+  "remote": {
+    "urls": ["https://*/*", "http://*/*"]
+  },
+  "permissions": ["shiguang-bridge"]
+}

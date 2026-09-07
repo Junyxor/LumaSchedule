@@ -1,0 +1,51 @@
+name: Desktop Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-latest, ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout Shiguang adapter warehouse
+        uses: actions/checkout@v4
+        with:
+          repository: XingHeYuZhuan/shiguang_warehouse
+          ref: main
+          path: .upstream/shiguang_warehouse
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - run: npm install
+      - name: Bundle current university adapters
+        env:
+          SHIGUANG_SOURCE: .upstream/shiguang_warehouse
+        run: node scripts/sync-shiguang-adapters.mjs
+      - run: npx tauri icon assets/app-icon.svg
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('LumaSchedule {0}', github.ref_name) || '' }}
+          releaseBody: 'Cross-platform LumaSchedule build.'
+          releaseDraft: true
+          prerelease: false
+          uploadWorkflowArtifacts: true

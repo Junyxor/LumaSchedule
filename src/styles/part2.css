@@ -1,0 +1,65 @@
+.icon-ghost { border:0;background:transparent;color:#9b9eaa;cursor:pointer; }
+.next-main { margin-top:28px; align-items:flex-end; }
+.next-main h2 { margin:0 0 7px; font-size:29px; letter-spacing:-.04em; }
+.next-main p { margin:0; display:flex; align-items:center; gap:6px; color:#8c909d; font-size:12px; }
+.time-block { text-align:right; }
+.time-block b { display:block; font-size:23px; font-variant-numeric:tabular-nums; }
+.time-block span { display:block; color:#9b9eaa; font-size:11px; margin-top:3px; }
+.progress { height:5px; margin:27px 0 14px; background:rgba(94,90,128,.08); border-radius:999px; overflow:hidden; }
+.progress i { display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#675fd4,#a399ff);box-shadow:0 0 9px rgba(103,95,212,.35); }
+.next-bottom { color:#999da8; font-size:10px; }
+.next-bottom button { border:0;background:transparent;color:#625ccd;font-size:10px;display:flex;align-items:center;gap:5px;cursor:pointer;font-weight:650; }
+.mini-card { border-radius:28px; min-height:238px; padding:22px; display:flex; flex-direction:column; justify-content:flex-end; }
+.weather-card { background:linear-gradient(155deg,rgba(255,255,255,.82),rgba(224,238,255,.62)); }
+.mini-icon { width:43px;height:43px;border-radius:15px;display:grid;place-items:center;background:rgba(255,255,255,.62);color:#7184b8;margin-bottom:auto;box-shadow:0 8px 22px rgba(91,112,156,.08); }
+.weather-card span,.weather-card small { display:block;color:#8c909d;font-size:10px; }
+.weather-card b { display:block;font-size:34px;letter-spacing:-.06em;margin:5px 0 2px; }
+.section-heading { display:flex;justify-content:space-between;align-items:flex-end;margin:30px 1px 13px; }
+.section-heading h2 { display:inline;margin:0 9px 0 0;font-size:19px;letter-spacing:-.035em; }
+.section-heading span { color:#a0a4af;font-size:10px; }
+.section-heading button { border:0;background:transparent;color:#706ac9;font-size:10px;display:flex;align-items:center;gap:5px;cursor:pointer; }
+.today-content { display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:16px; }
+.timeline-card { min-height:262px;border-radius:25px;padding:20px 22px;position:relative;overflow:hidden; }
+.timeline-hours { display:grid;grid-template-columns:repeat(6,1fr);color:#b0b3bc;font-size:9px;font-variant-numeric:tabular-nums;margin-bottom:10px; }
+.timeline-line { height:1px;background:rgba(77,80,98,.07);position:relative;margin-bottom:17px; }
+.timeline-line i { position:absolute;top:-3px;width:7px;height:7px;border-radius:50%;background:#6b64d8;box-shadow:0 0 0 4px rgba(107,100,216,.12); }
+.timeline-courses { display:flex;flex-direction:column;gap:9px; }
+.course-pill { min-height:53px;display:grid;grid-template-columns:4px 1fr auto;gap:12px;align-items:center;border-radius:16px;padding:8px 14px 8px 8px;background:rgba(255,255,255,.52);border:1px solid rgba(255,255,255,.72); }
+.course-accent { width:4px;height:32px;border-radius:999px;background:#756ee0; }
+.course-pill.cyan .course-accent,.source-icon.cyan { background:#50afc8; }
+.course-pill.amber .course-accent,.source-icon.amber { background:#e2a85a; }
+.course-pill.blue .course-accent,.source-icon.blue { background:#6996da; }
+.course-pill.green .course-accent,.source-icon.green { background:#63af88; }
+.course-pill.pink .course-accent,.source-icon.pink { background:#cb7faa; }
+.course-pill.orange .course-accent,.source-icon.orange { background:#dc8859; }
+.course-info b { display:block;font-size:11px; }
+.course-info span { display:block;color:#9b9eaa;font-size:9px;margin-top:3px; }
+.course-pill time { font-size:11px;font-weight:650;color:#777b88;font-variant-numeric:tabular-nums; }
+.quick-stack { display:flex;flex-direction:column;gap:12px; }
+.quick-card { border:0;border-radius:22px;min-height:125px;padding:20px;text-align:left;display:flex;align-items:center;gap:13px;cursor:pointer; }
+.quick-card > div { flex:1; }
+.quick-card b { display:block;font-size:12px; }
+.quick-card small { display:block;color:#9da0ab;font-size:9px;margin-top:4px; }
+.quick-orb { width:36px;height:36px;border-radius:13px;box-shadow:inset 0 1px 1px rgba(255,255,255,.7); }
+.orb-a { background:linear-gradient(145deg,#c8c1ff,#766fdd); }
+.orb-b { background:linear-gradient(145deg,#ffcfb5,#e9906d); }
+
+.week-topbar .top-actions { margin-left:0; }
+.week-controls { padding:5px;border-radius:15px;display:flex;align-items:center;gap:4px; }
+.week-controls button { border:0;background:transparent;width:32px;height:32px;display:grid;place-items:center;border-radius:10px;color:#747887;cursor:pointer; }
+.week-controls span { min-width:42px;text-align:center;font-size:10px;font-weight:650;color:#696d7a; }
+.week-board { border-radius:27px;overflow:hidden;min-height:650px; }
+.week-header { display:grid;grid-template-columns:54px repeat(7,1fr);height:65px;border-bottom:1px solid rgba(80,84,104,.08); }
+.week-header > div { display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px;color:#999da9;font-size:9px;border-left:1px solid rgba(80,84,104,.045); }
+.week-header > div b { font-size:14px;color:#6f7380; }
+.week-header .today { background:rgba(102,95,210,.06);color:#665fd2; }
+.week-header .today b { color:#5f58cd; }
+.week-header .corner { border:0;font-weight:650; }
+.week-scroll { height:585px;position:relative;padding-left:54px;background:linear-gradient(rgba(255,255,255,.18),rgba(255,255,255,.05));overflow:auto; }
+.section-column { position:absolute;left:0;top:0;width:54px;height:780px;display:grid;grid-template-rows:repeat(12,65px);border-right:1px solid rgba(80,84,104,.07); }
+.section-column div { display:flex;flex-direction:column;align-items:center;justify-content:center;border-bottom:1px solid rgba(80,84,104,.06); }
+.section-column b { font-size:10px;color:#858996; }
+.section-column span { font-size:7px;color:#b0b3bc;margin-top:2px; }
+.week-gridlines { position:absolute;inset:0 0 auto 54px;height:780px;display:grid;grid-template-columns:repeat(7,1fr);background:repeating-linear-gradient(to bottom,transparent 0,transparent 64px,rgba(77,82,102,.055) 64px,rgba(77,82,102,.055) 65px); }
+.week-gridlines div { border-left:1px solid rgba(77,82,102,.05); }
+.week-course { position:absolute;left:calc(54px + (var(--day) - 1) * ((100% - 54px) / 7) + 5px);top:calc((var(--start) - 1) * 65px + 5px);width:calc((100% - 54px) / 7 - 10px);height:calc(var(--span) * 65px - 10px);border:0;border-radius:14px;text-align:left;padding:10px;color:#494651;background:linear-gradient(145deg,#dfdcff,#c5c0ff);box-shadow:0 6px 14px rgba(85,77,160,.08),inset 0 1px 1px rgba(255,255,255,.65);overflow:hidden;cursor:pointer; }
