@@ -115,7 +115,7 @@ class DataTransferEngine(private val dbFile: File) {
         require(root.optInt("schemaVersion") == SCHEMA_VERSION) { "不支持的备份版本。" }
         val tables = root.optJSONObject("tables") ?: error("备份缺少 tables。")
         return withDatabase(readOnly = false) { db ->
-            db.execSQL("PRAGMA foreign_keys=ON")
+            db.setForeignKeyConstraintsEnabled(true)
             db.beginTransaction()
             try {
                 for (table in DELETE_ORDER) db.delete(table, null, null)
