@@ -12,6 +12,8 @@ import android.os.SystemClock
 import android.view.View
 import android.view.Window
 import android.view.WindowManager
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -36,6 +38,7 @@ class MainActivity : Activity() {
     private val pickerLock = Any()
     @Volatile private var pickerLatch: CountDownLatch? = null
     @Volatile private var pickerResult: Uri? = null
+    private var webFileChooserCallback: ValueCallback<Array<Uri>>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -88,6 +91,31 @@ class MainActivity : Activity() {
             cacheMode = WebSettings.LOAD_DEFAULT
             userAgentString = "$userAgentString LumaScheduleNative/${BuildConfig.VERSION_NAME}"
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) safeBrowsingEnabled = true
+        }
+
+        view.webChromeClient = object : WebChromeClient() {
+            override fun onShowFileChooser(
+                webView: WebView?,
+                filePathCallback: ValueCallback<Array<Uri>>?,
+                fileChooserParams: FileChooserParams?
+            ): Boolean {
+                webFileChooserCallback?.onReceiveValue(null)
+                webFileChooserCallback = filePathCallback
+                val intent = runCatching { fileChooserParams?.createIntent() }.getOrNull()
+                if (intent == null) {
+                    webFileChooserCallback?.onReceiveValue(null)
+                    webFileChooserCallback = null
+                    return false
+                }
+                return runCatching {
+                    startActivityForResult(intent, REQUEST_WEB_FILE)
+                    true
+                }.getOrElse {
+                    webFileChooserCallback?.onReceiveValue(null)
+                    webFileChooserCallback = null
+                    false
+                }
+            }
         }
 
         view.webViewClient = object : WebViewClient() {
@@ -218,6 +246,12 @@ class MainActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_WEB_FILE) {
+            val callback = webFileChooserCallback
+            webFileChooserCallback = null
+            callback?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data))
+            return
+        }
         if (requestCode == REQUEST_DOCUMENT) {
             pickerResult = if (resultCode == RESULT_OK) data?.data else null
             pickerLatch?.countDown()
@@ -241,6 +275,8 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         pickerLatch?.countDown()
         notificationLatch?.countDown()
+        webFileChooserCallback?.onReceiveValue(null)
+        webFileChooserCallback = null
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface("LumaNative")
             webView.stopLoading()
@@ -256,5 +292,6 @@ class MainActivity : Activity() {
         private const val APP_URL = "https://$APP_HOST/index.html"
         private const val REQUEST_NOTIFICATIONS = 4017
         private const val REQUEST_DOCUMENT = 4018
+        private const val REQUEST_WEB_FILE = 4019
     }
 }
