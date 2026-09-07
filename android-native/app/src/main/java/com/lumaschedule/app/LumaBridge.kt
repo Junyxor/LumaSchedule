@@ -13,7 +13,6 @@ import com.lumaschedule.app.data.LumaDatabase
 import com.lumaschedule.app.widgets.BootReceiver
 import com.lumaschedule.app.widgets.NextCourseWidgetProvider
 import com.lumaschedule.app.widgets.ReminderReceiver
-import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.ExecutorService
 
@@ -107,7 +106,7 @@ class LumaBridge(
         if (ids.isNotEmpty()) {
             activity.sendBroadcast(Intent(AppWidgetManager.ACTION_APPWIDGET_UPDATE).apply {
                 putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
-                componentName = component
+                this.component = component
             })
         }
         return true
