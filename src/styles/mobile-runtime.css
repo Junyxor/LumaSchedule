@@ -20,4 +20,20 @@
   }
   .week-gridlines { height: calc(var(--section-count) * 56px); }
   .week-scroll::after { height: calc(var(--section-count) * 56px); }
+
+  /* The tab bar owns the system bottom safe area instead of floating above it. */
+  .mobile-nav {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: auto;
+    min-height: calc(66px + env(safe-area-inset-bottom));
+    padding: 5px 8px max(6px, env(safe-area-inset-bottom));
+    border-radius: 27px 27px 0 0;
+    box-sizing: border-box;
+  }
+  .page {
+    padding-bottom: calc(88px + env(safe-area-inset-bottom));
+  }
 }
