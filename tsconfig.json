@@ -11,6 +11,10 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "strict": true,
+    "baseUrl": ".",
+    "paths": {
+      "@tauri-apps/plugin-dialog": ["src/lib/shims/dialog.ts"]
+    },
     "types": [
       "svelte",
       "node"
