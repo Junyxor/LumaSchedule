@@ -43,6 +43,8 @@ jobs:
         env:
           SHIGUANG_SOURCE: .upstream/shiguang_warehouse
         run: node scripts/sync-shiguang-adapters.mjs
+      - name: Validate bundled adapter contract
+        run: node scripts/validate-shiguang-contract.mjs
       - name: Build Svelte assets
         run: npm run build
       - name: Create ephemeral test signing key
@@ -102,6 +104,8 @@ jobs:
         env:
           SHIGUANG_SOURCE: .upstream/shiguang_warehouse
         run: node scripts/sync-shiguang-adapters.mjs
+      - name: Validate bundled adapter contract
+        run: node scripts/validate-shiguang-contract.mjs
       - run: npm run build
       - name: Restore Android signing key
         env:
