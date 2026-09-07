@@ -1,0 +1,28 @@
+[[permission]]
+identifier = "main-app"
+description = "Allows the trusted local LumaSchedule main window to use schedule, import, backup, WebDAV, widget, reminder, and Shiguang orchestration commands. Remote teaching-system webviews do not receive this permission."
+commands.allow = [
+  "get_bootstrap",
+  "save_glass_settings",
+  "import_schedule_text",
+  "commit_import_bundle",
+  "list_schedule_courses",
+  "export_latest_schedule_json",
+  "export_latest_schedule_ics",
+  "export_full_backup",
+  "restore_full_backup",
+  "validate_adapter_url",
+  "get_webdav_profile",
+  "save_webdav_profile",
+  "webdav_test",
+  "webdav_upload_backup",
+  "webdav_restore_backup",
+  "update_widget_snapshot",
+  "schedule_native_reminder",
+  "cancel_native_reminder",
+  "shiguang_list_schools",
+  "shiguang_list_adapters",
+  "shiguang_start_import",
+  "shiguang_get_session",
+  "shiguang_close_session"
+]
