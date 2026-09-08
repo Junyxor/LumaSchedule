@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { ArrowLeft, BookOpenCheck, Building2, CalendarSync, CheckCircle2, ChevronRight, FileJson2, FileSpreadsheet, LoaderCircle, Search, ShieldCheck, TriangleAlert, UploadCloud, X } from 'lucide-svelte';
+  import { ArrowLeft, BookOpenCheck, Building2, CalendarSync, CheckCircle2, ChevronRight, ExternalLink, FileJson2, FileSpreadsheet, LoaderCircle, Search, ShieldCheck, TriangleAlert, UploadCloud, X } from 'lucide-svelte';
   import ConfirmSheet from '../components/ConfirmSheet.svelte';
-  import { closeShiguangSession, commitImport, getShiguangSession, importText, listShiguangAdapters, listShiguangSchools, previewImport, startShiguangImport } from '../tauri';
-  import type { ImportBundle, ImportDiff, ImportMode, ShiguangAdapter, ShiguangImportStart, ShiguangSchool } from '../types';
+  import { closeShiguangSession, commitImport, getShiguangSession, importText, listShiguangAdapters, listShiguangSchools, previewImport, startCompatibilityImport, startShiguangImport } from '../tauri';
+  import type { CompatibilityFamily, ImportBundle, ImportDiff, ImportMode, ShiguangAdapter, ShiguangImportStart, ShiguangSchool } from '../types';
   import { createEventDispatcher, onDestroy, tick } from 'svelte';
 
   const dispatch = createEventDispatcher<{ imported: void }>();
@@ -13,6 +13,12 @@
     { icon: BookOpenCheck, title: 'ICS / iCalendar', subtitle: '导入标准 iCalendar 课表文件', tag: '跨平台', accent: 'blue', accept: '.ics,.ical' }
   ];
   const genericSchoolIds = new Set(['zhengfang_jiaowu', 'chaoxing_jiaowu', 'qingguo_jiaowu', 'urp_jiaowu']);
+  const compatibilityFamilies: { id: CompatibilityFamily; label: string }[] = [
+    { id: 'zhengfang_jiaowu', label: '正方' },
+    { id: 'qingguo_jiaowu', label: '青果' },
+    { id: 'urp_jiaowu', label: 'URP' },
+    { id: 'chaoxing_jiaowu', label: '超星' }
+  ];
 
   let fileInput: HTMLInputElement;
   let schoolSearchInput: HTMLInputElement;
@@ -37,6 +43,8 @@
   let activeSession: ShiguangImportStart | null = null;
   let sessionMessage = '';
   let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let compatibilityUrl = '';
+  let compatibilityFamily: CompatibilityFamily = 'zhengfang_jiaowu';
 
   let sheetOffset = 0;
   let sheetDragging = false;
@@ -52,6 +60,7 @@
     .sort((a,b) => Number(b.id === 'GDUT') - Number(a.id === 'GDUT') || a.initial.localeCompare(b.initial, 'zh-CN'))
     .slice(0,100);
   $: showGenericSuggestions = genericSchools.length > 0 && normalizedSchoolQuery.length > 0 && filteredSchools.length === 0;
+  $: bingUrl = `https://www.bing.com/search?q=${encodeURIComponent(`${schoolQuery.trim() || '学校'} 教务系统 官网`)}`;
 
   function formatFor(name: string) {
     const ext = name.toLowerCase().split('.').pop() ?? '';
@@ -219,6 +228,21 @@
     finally{ shiguangLoading=false; }
   }
 
+  async function beginCompatibility(){
+    if(shiguangLoading || activeSession)return;
+    if(!compatibilityUrl.trim()){
+      shiguangError='先粘贴学校官方教务系统地址。';
+      return;
+    }
+    shiguangError=''; shiguangLoading=true; sessionMessage='正在准备兼容模式登录环境…';
+    try{
+      activeSession=await startCompatibilityImport(compatibilityUrl,compatibilityFamily,schoolQuery);
+      sessionMessage='兼容模式已打开。登录并进入个人课表查询页面，确认课表已显示后点顶部「尝试抓取课表」。';
+      void pollShiguang(activeSession.sessionId);
+    }catch(e){ shiguangError=friendlyError(e); sessionMessage=''; }
+    finally{ shiguangLoading=false; }
+  }
+
   async function pollShiguang(sessionId:string){
     if(pollTimer)clearTimeout(pollTimer);
     try{
@@ -321,13 +345,18 @@
           <div class="adapter-empty adapter-index-error"><TriangleAlert size={16}/> 学校索引读取失败，请稍后重试；文件导入仍可正常使用。</div>
         {:else}
           {#if showGenericSuggestions}
-            <div class="generic-adapters"><span>没有单独学校适配，可以尝试通用教务</span><div>{#each genericSchools as school}<button on:click={()=>void chooseSchool(school)}>{school.name.replace('-通用教务','')}</button>{/each}</div></div>
+            <div class="compatibility-panel">
+              <div class="compatibility-head"><div><b>没找到学校？使用兼容模式</b><span>粘贴学校官方教务地址，再选择常见教务系统类型。</span></div><a href={bingUrl}><ExternalLink size={13}/> 搜索官网</a></div>
+              <div class="compatibility-families">{#each compatibilityFamilies as family}<button class:active={compatibilityFamily===family.id} on:click={()=>compatibilityFamily=family.id}>{family.label}</button>{/each}</div>
+              <div class="compatibility-url"><input bind:value={compatibilityUrl} inputmode="url" placeholder="https://学校官方教务域名/"/><button on:click={()=>void beginCompatibility()} disabled={shiguangLoading}>打开登录</button></div>
+              <small><ShieldCheck size={12}/> 只粘贴你确认过的学校官方域名。登录窗口会限制在同一机构域名范围内；搜索结果不会自动获得登录权限。</small>
+            </div>
           {/if}
           <div class="school-list">{#each filteredSchools as school}<button class:featured-school={school.id==='GDUT'} on:click={()=>void chooseSchool(school)}><span>{school.initial.slice(0,1)||'校'}</span><div><b>{school.name}</b><small>{school.id}</small></div>{#if school.id==='GDUT'}<em>已验证</em>{/if}<ChevronRight size={16}/></button>{/each}{#if normalizedSchoolQuery && !filteredSchools.length && !showGenericSuggestions}<div class="adapter-empty">没有找到匹配学校。可以使用文件导入，或换关键词重试。</div>{/if}</div>
         {/if}
       {/if}
       {#if shiguangError && schools.length>0}<div class="adapter-error"><X size={15}/> {shiguangError}</div>{/if}
-      <div class="adapter-sandbox-note"><ShieldCheck size={16}/><span>适配数据来自开源 shiguang_warehouse；在线优先，离线回退随 App 打包的最近快照。</span></div>
+      <div class="adapter-sandbox-note"><ShieldCheck size={16}/><span>适配数据来自开源 shiguang_warehouse；学校已收录时优先使用专用适配器，未收录时再使用兼容模式。</span></div>
     </div>
   </div>
 {/if}
@@ -365,14 +394,29 @@
   .conflict-note,.overwrite-note { border-radius:12px; padding:9px 10px; font-size:9px; line-height:1.5; }
   .conflict-note { display:flex; align-items:flex-start; gap:6px; color:#93631d; background:rgba(221,153,58,.09); }
   .overwrite-note { color:#a24857; background:rgba(220,70,84,.07); }
-  .generic-adapters { display: grid; gap: 7px; padding: 0 2px; }
-  .generic-adapters > span { font-size: 11px; opacity: .62; }
-  .generic-adapters > div { display: flex; flex-wrap: wrap; gap: 6px; }
-  .generic-adapters button { min-height: 31px; padding: 0 10px; border: 1px solid rgba(91,86,214,.16); border-radius: 999px; background: rgba(91,86,214,.08); color: inherit; font-size: 11px; }
+  .compatibility-panel { flex:0 0 auto; display:grid; gap:9px; padding:12px; border:1px solid rgba(91,86,214,.13); border-radius:17px; background:rgba(91,86,214,.055); }
+  .compatibility-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .compatibility-head > div { min-width:0; }
+  .compatibility-head b,.compatibility-head span { display:block; }
+  .compatibility-head b { font-size:11px; }
+  .compatibility-head span { margin-top:2px; color:rgba(60,60,67,.56); font-size:9px; line-height:1.4; }
+  .compatibility-head a { flex:none; min-height:29px; display:inline-flex; align-items:center; gap:5px; padding:0 9px; border-radius:999px; background:rgba(255,255,255,.48); color:#5751c9; text-decoration:none; font-size:9px; }
+  .compatibility-families { display:flex; flex-wrap:wrap; gap:6px; }
+  .compatibility-families button { min-height:30px; padding:0 11px; border:1px solid rgba(91,86,214,.15); border-radius:999px; background:rgba(255,255,255,.45); color:inherit; font-size:10px; }
+  .compatibility-families button.active { color:#514bd0; border-color:rgba(91,86,214,.32); background:rgba(91,86,214,.13); }
+  .compatibility-url { display:grid; grid-template-columns:1fr auto; gap:7px; }
+  .compatibility-url input { min-width:0; min-height:40px; border:1px solid rgba(60,60,67,.08); border-radius:12px; background:rgba(255,255,255,.58); padding:0 11px; color:inherit; outline:none; font-size:10px; }
+  .compatibility-url button { min-height:40px; border:0; border-radius:12px; padding:0 13px; background:#5b56d6; color:white; font-size:10px; font-weight:650; }
+  .compatibility-panel > small { display:flex; align-items:flex-start; gap:5px; color:rgba(60,60,67,.5); font-size:8px; line-height:1.45; }
   .adapter-index-error { display:flex; align-items:center; justify-content:center; gap:7px; }
   .adapter-browser { transition: transform .22s cubic-bezier(.2,.75,.25,1); will-change: transform; }
   .adapter-browser.sheet-dragging { transition: none; }
   .sheet-grabber { touch-action: none; cursor: grab; padding: 9px 10px; margin: -9px auto -7px; background-clip: content-box; box-sizing: content-box; }
   .sheet-grabber:active { cursor: grabbing; }
-  @media (max-width:760px) { .diff-grid { grid-template-columns:repeat(2,1fr); } .mode-options { grid-template-columns:1fr; } .mode-options button { min-height:52px; } }
+  @media (max-width:760px) {
+    .diff-grid { grid-template-columns:repeat(2,1fr); }
+    .mode-options { grid-template-columns:1fr; }
+    .mode-options button { min-height:52px; }
+    .compatibility-head { align-items:center; }
+  }
 </style>
