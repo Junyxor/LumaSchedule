@@ -43,18 +43,9 @@ class LumaDatabase(context: Context) : Closeable {
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_schedules_term ON schedules(term_id)")
     }
 
-    fun getSettingRaw(key: String): String? = synchronized(lock) {
-        db.rawQuery("SELECT value_json FROM settings WHERE key=? LIMIT 1", arrayOf(key)).use { cursor ->
-            if (cursor.moveToFirst()) cursor.getString(0) else null
-        }
-    }
+    fun getSettingRaw(key: String): String? = synchronized(lock) { getSettingRawUnlocked(key) }
 
-    fun setSettingRaw(key: String, rawJson: String) = synchronized(lock) {
-        db.execSQL(
-            "INSERT INTO settings(key, value_json) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json",
-            arrayOf(key, rawJson)
-        )
-    }
+    fun setSettingRaw(key: String, rawJson: String) = synchronized(lock) { setSettingRawUnlocked(key, rawJson) }
 
     fun getScheduleSnapshot(): JSONObject = synchronized(lock) {
         val scheduleId = latestScheduleId() ?: return@synchronized JSONObject()
@@ -65,21 +56,23 @@ class LumaDatabase(context: Context) : Closeable {
         var termName: String? = null
         var termStart: String? = null
         var weekCount: Int? = null
+        var timezone = DEFAULT_TIMEZONE
         var sectionsRaw: String? = null
 
         db.rawQuery(
-            "SELECT t.name, t.start_date, t.week_count, COALESCE(ts.sections_json, '') FROM schedules s JOIN terms t ON t.id=s.term_id LEFT JOIN time_schemes ts ON ts.id=s.time_scheme_id WHERE s.id=? LIMIT 1",
+            "SELECT t.name, t.start_date, t.week_count, t.timezone, COALESCE(ts.sections_json, '') FROM schedules s JOIN terms t ON t.id=s.term_id LEFT JOIN time_schemes ts ON ts.id=s.time_scheme_id WHERE s.id=? LIMIT 1",
             arrayOf(scheduleId)
         ).use { cursor ->
             if (cursor.moveToFirst()) {
                 termName = cursor.getString(0)
                 termStart = cursor.getString(1)
                 weekCount = cursor.getInt(2).coerceIn(1, 64)
-                sectionsRaw = cursor.getString(3)
+                timezone = cursor.getString(3).takeIf { it.isNotBlank() } ?: DEFAULT_TIMEZONE
+                sectionsRaw = cursor.getString(4)
             }
         }
 
-        val currentWeek = academicWeek(termStart.orEmpty(), weekCount ?: 20)
+        val currentWeek = academicWeek(termStart.orEmpty(), weekCount ?: 20, timezone)
         val visible = when {
             currentWeek == OUTSIDE_TERM -> emptyList()
             currentWeek > 0 -> courses.filter { course ->
@@ -108,8 +101,45 @@ class LumaDatabase(context: Context) : Closeable {
         result
     }
 
+    fun getSchedulePreferences(): JSONObject = synchronized(lock) { schedulePreferencesUnlocked() }
+
+    fun saveSchedulePreferences(input: JSONObject): JSONObject = synchronized(lock) {
+        val display = JSONObject()
+            .put("showWeekend", input.optBoolean("showWeekend", true))
+            .put("showTeacher", input.optBoolean("showTeacher", true))
+            .put("showRoom", input.optBoolean("showRoom", true))
+            .put("showTime", input.optBoolean("showTime", true))
+            .put("compactMode", input.optBoolean("compactMode", false))
+            .put("defaultSections", input.optInt("defaultSections", 12).coerceIn(8, 30))
+        setSettingRawUnlocked(SCHEDULE_DISPLAY_KEY, display.toString())
+
+        val scheduleId = latestScheduleId()
+        if (scheduleId != null) {
+            val current = schedulePreferencesUnlocked()
+            val termName = stringValue(input, "termName").ifBlank { current.optString("termName", "当前学期") }
+            val termStart = stringValue(input, "termStart")
+            if (termStart.isNotBlank()) require(runCatching { LocalDate.parse(termStart) }.isSuccess) { "开学日期格式应为 YYYY-MM-DD" }
+            val weekCount = input.optInt("weekCount", current.optInt("weekCount", 20)).coerceIn(1, 64)
+            val weekStartsOn = input.optInt("weekStartsOn", current.optInt("weekStartsOn", 1)).coerceIn(1, 7)
+            val timezone = stringValue(input, "timezone").ifBlank { current.optString("timezone", DEFAULT_TIMEZONE) }
+            require(runCatching { ZoneId.of(timezone) }.isSuccess) { "无效时区：$timezone" }
+
+            db.rawQuery("SELECT term_id FROM schedules WHERE id=? LIMIT 1", arrayOf(scheduleId)).use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val termId = cursor.getString(0)
+                    db.execSQL(
+                        "UPDATE terms SET name=?, start_date=?, week_count=?, timezone=? WHERE id=?",
+                        arrayOf(termName, termStart, weekCount, timezone, termId)
+                    )
+                }
+            }
+            db.execSQL("UPDATE schedules SET week_starts_on=? WHERE id=?", arrayOf(weekStartsOn, scheduleId))
+        }
+        schedulePreferencesUnlocked()
+    }
+
     fun saveScheduleCourse(input: JSONObject): String = synchronized(lock) {
-        val name = input.optString("name").trim()
+        val name = stringValue(input, "name")
         require(name.isNotEmpty()) { "课程名称不能为空" }
         val day = input.optInt("day")
         require(day in 1..7) { "星期必须在 1 到 7 之间" }
@@ -117,17 +147,17 @@ class LumaDatabase(context: Context) : Closeable {
         val endSection = input.optInt("endSection")
         require(startSection > 0 && endSection >= startSection && endSection <= 30) { "课程节次范围无效" }
 
-        val teacher = input.optString("teacher").trim()
-        val room = input.optString("room").trim()
-        val start = input.optString("start").trim()
-        val end = input.optString("end").trim()
+        val teacher = stringValue(input, "teacher")
+        val room = stringValue(input, "room")
+        val start = stringValue(input, "start")
+        val end = stringValue(input, "end")
         val weeks = normalizeWeeks(input.optJSONArray("weeks"))
         val weeksMask = maskFromWeeks(weeks)
 
         db.beginTransaction()
         try {
             val scheduleId = latestScheduleId() ?: createManualSchedule()
-            val incomingId = input.optString("id").trim().takeIf { it.isNotEmpty() }
+            val incomingId = stringValue(input, "id").takeIf { it.isNotEmpty() }
             val meetingId: String
 
             if (incomingId != null) {
@@ -177,83 +207,304 @@ class LumaDatabase(context: Context) : Closeable {
         }
     }
 
-    fun commitImport(bundle: JSONObject): JSONObject = synchronized(lock) {
-        val source = bundle.optString("source", "import").ifBlank { "import" }
-        val termId = UUID.randomUUID().toString()
-        val scheduleId = UUID.randomUUID().toString()
-        val termName = bundle.optString("termName").ifBlank { "导入学期" }
-        val termStart = bundle.optString("termStart")
-        val courses = bundle.optJSONArray("courses") ?: JSONArray()
-        val metadata = bundle.optJSONObject("metadata") ?: JSONObject()
-        val config = metadata.optString("courseConfig").takeIf { it.isNotBlank() }?.let { runCatching { JSONObject(it) }.getOrNull() }
+    fun previewImport(bundle: JSONObject): JSONObject = synchronized(lock) {
+        val incoming = importItems(bundle)
+        val scheduleId = latestScheduleId()
+        val existing = scheduleId?.let(::listScheduleCourses).orEmpty()
+        val existingSignatures = existing.map(::meetingSignature).toSet()
+        val incomingSignatures = linkedSetOf<String>()
+        var newCount = 0
+        var duplicateCount = 0
+        var conflictCount = 0
 
-        var weekCount = config?.optInt("semesterTotalWeeks", 0)?.takeIf { it > 0 } ?: 0
-        if (weekCount == 0) {
-            for (i in 0 until courses.length()) {
-                val weeks = courses.optJSONObject(i)?.optJSONArray("weeks") ?: continue
-                for (j in 0 until weeks.length()) weekCount = maxOf(weekCount, weeks.optInt(j))
+        incoming.forEach { item ->
+            val signature = meetingSignature(item)
+            if (!incomingSignatures.add(signature) || signature in existingSignatures) {
+                duplicateCount++
+            } else {
+                newCount++
+                if (existing.any { other -> meetingSignature(other) != signature && meetingsConflict(item, other) }) conflictCount++
             }
         }
-        if (weekCount <= 0) weekCount = 20
-        weekCount = weekCount.coerceIn(1, 64)
-        val weekStartsOn = config?.optInt("firstDayOfWeek", 1)?.coerceIn(1, 7) ?: 1
+        val removeCount = existingSignatures.count { it !in incomingSignatures }
+        JSONObject()
+            .put("hasExistingSchedule", scheduleId != null)
+            .put("existingCourseCount", scheduleId?.let(::countCourses) ?: 0)
+            .put("existingMeetingCount", existing.size)
+            .put("incomingCourseCount", incoming.map(::courseKey).toSet().size)
+            .put("incomingMeetingCount", incoming.size)
+            .put("newCount", newCount)
+            .put("duplicateCount", duplicateCount)
+            .put("conflictCount", conflictCount)
+            .put("removeCount", removeCount)
+    }
 
+    fun commitImport(bundle: JSONObject, requestedMode: String = "new"): JSONObject = synchronized(lock) {
+        val mode = requestedMode.lowercase().takeIf { it in setOf("new", "merge", "overwrite") } ?: "new"
+        val existingScheduleId = latestScheduleId()
         db.beginTransaction()
         try {
-            db.execSQL("INSERT INTO terms(id, name, start_date, week_count, timezone) VALUES(?, ?, ?, ?, 'Asia/Shanghai')", arrayOf(termId, termName, termStart, weekCount))
-
-            val timeSchemeId = metadata.optString("timeScheme").takeIf { it.isNotBlank() }?.let { raw ->
-                val parsed = runCatching { if (raw.trim().startsWith("[")) JSONArray(raw) else JSONObject(raw) }.getOrNull()
-                if (parsed != null) {
-                    val id = UUID.randomUUID().toString()
-                    db.execSQL("INSERT INTO time_schemes(id, name, sections_json) VALUES(?, ?, ?)", arrayOf(id, "$source · 导入作息", raw))
-                    id
-                } else null
+            val result = when {
+                existingScheduleId == null || mode == "new" -> createImportedSchedule(bundle, mode)
+                mode == "merge" -> mergeImportedSchedule(existingScheduleId, bundle)
+                else -> overwriteImportedSchedule(existingScheduleId, bundle)
             }
-
-            db.execSQL(
-                "INSERT INTO schedules(id, term_id, name, week_starts_on, time_scheme_id) VALUES(?, ?, ?, ?, ?)",
-                arrayOf(scheduleId, termId, "$source · 导入课表", weekStartsOn, timeSchemeId)
-            )
-
-            val courseIds = LinkedHashMap<String, String>()
-            var meetingCount = 0
-            for (i in 0 until courses.length()) {
-                val item = courses.optJSONObject(i) ?: continue
-                val name = item.optString("name").trim()
-                if (name.isEmpty()) continue
-                val teacher = item.optString("teacher").trim()
-                val key = "$name\u001f$teacher"
-                val courseId = courseIds[key] ?: UUID.randomUUID().toString().also { id ->
-                    db.execSQL("INSERT INTO courses(id, schedule_id, name, teacher, color_token) VALUES(?, ?, ?, ?, 'auto')", arrayOf(id, scheduleId, name, teacher.takeIf(String::isNotEmpty)))
-                    courseIds[key] = id
-                }
-                val weeks = normalizeWeeks(item.optJSONArray("weeks"))
-                val meetingId = UUID.randomUUID().toString()
-                db.execSQL(
-                    "INSERT INTO course_meetings(id, course_id, weekday, start_section, end_section, start_time, end_time, weeks_mask, location) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    arrayOf(
-                        meetingId,
-                        courseId,
-                        item.optInt("weekday", item.optInt("day", 1)).coerceIn(1, 7),
-                        item.optInt("startSection", 1).coerceAtLeast(1),
-                        item.optInt("endSection", item.optInt("startSection", 1)).coerceAtLeast(1),
-                        item.optString("startTime").takeIf(String::isNotBlank),
-                        item.optString("endTime").takeIf(String::isNotBlank),
-                        maskFromWeeks(weeks),
-                        item.optString("location").takeIf(String::isNotBlank)
-                    )
-                )
-                meetingCount++
-            }
-
-            val audit = JSONObject().put("termId", termId).put("scheduleId", scheduleId).put("courseCount", courseIds.size).put("meetingCount", meetingCount)
-            db.execSQL("INSERT INTO import_audit(source, summary_json) VALUES(?, ?)", arrayOf(source, audit.toString()))
             db.setTransactionSuccessful()
-            JSONObject().put("termId", termId).put("scheduleId", scheduleId).put("courseCount", courseIds.size).put("meetingCount", meetingCount)
+            result
         } finally {
             db.endTransaction()
         }
+    }
+
+    private fun createImportedSchedule(bundle: JSONObject, requestedMode: String): JSONObject {
+        val meta = importMeta(bundle)
+        val termId = UUID.randomUUID().toString()
+        val scheduleId = UUID.randomUUID().toString()
+        db.execSQL(
+            "INSERT INTO terms(id, name, start_date, week_count, timezone) VALUES(?, ?, ?, ?, ?)",
+            arrayOf(termId, meta.termName, meta.termStart, meta.weekCount, DEFAULT_TIMEZONE)
+        )
+        val timeSchemeId = createTimeScheme(meta.source, meta.timeSchemeRaw)
+        db.execSQL(
+            "INSERT INTO schedules(id, term_id, name, week_starts_on, time_scheme_id) VALUES(?, ?, ?, ?, ?)",
+            arrayOf(scheduleId, termId, "${meta.source} · 导入课表", meta.weekStartsOn, timeSchemeId)
+        )
+        val stats = insertImportedMeetings(scheduleId, importItems(bundle), emptySet())
+        val result = importResult(requestedMode, termId, scheduleId, stats.added, stats.skipped, 0)
+        writeImportAudit(meta.source, result)
+        return result
+    }
+
+    private fun mergeImportedSchedule(scheduleId: String, bundle: JSONObject): JSONObject {
+        val meta = importMeta(bundle)
+        val existing = listScheduleCourses(scheduleId)
+        val signatures = existing.map(::meetingSignature).toSet()
+        var termId = ""
+        var existingName = ""
+        var existingStart = ""
+        var existingWeeks = 20
+        var currentSchemeId: String? = null
+        db.rawQuery(
+            "SELECT t.id, t.name, t.start_date, t.week_count, s.time_scheme_id FROM schedules s JOIN terms t ON t.id=s.term_id WHERE s.id=? LIMIT 1",
+            arrayOf(scheduleId)
+        ).use { cursor ->
+            if (cursor.moveToFirst()) {
+                termId = cursor.getString(0)
+                existingName = cursor.getString(1)
+                existingStart = cursor.getString(2)
+                existingWeeks = cursor.getInt(3)
+                currentSchemeId = if (cursor.isNull(4)) null else cursor.getString(4)
+            }
+        }
+        val mergedName = if (existingName.isBlank() || existingName == "手动课表" || existingName == "导入学期") meta.termName else existingName
+        val mergedStart = existingStart.ifBlank { meta.termStart }
+        db.execSQL(
+            "UPDATE terms SET name=?, start_date=?, week_count=? WHERE id=?",
+            arrayOf(mergedName, mergedStart, maxOf(existingWeeks, meta.weekCount).coerceIn(1, 64), termId)
+        )
+        if (currentSchemeId == null && meta.timeSchemeRaw != null) {
+            val schemeId = createTimeScheme(meta.source, meta.timeSchemeRaw)
+            db.execSQL("UPDATE schedules SET time_scheme_id=? WHERE id=?", arrayOf(schemeId, scheduleId))
+        }
+        val stats = insertImportedMeetings(scheduleId, importItems(bundle), signatures)
+        val result = importResult("merge", termId, scheduleId, stats.added, stats.skipped, 0)
+        writeImportAudit(meta.source, result)
+        return result
+    }
+
+    private fun overwriteImportedSchedule(scheduleId: String, bundle: JSONObject): JSONObject {
+        val meta = importMeta(bundle)
+        var termId = ""
+        var oldSchemeId: String? = null
+        db.rawQuery("SELECT term_id, time_scheme_id FROM schedules WHERE id=? LIMIT 1", arrayOf(scheduleId)).use { cursor ->
+            if (cursor.moveToFirst()) {
+                termId = cursor.getString(0)
+                oldSchemeId = if (cursor.isNull(1)) null else cursor.getString(1)
+            }
+        }
+        val removedCount = countMeetings(scheduleId)
+        db.execSQL("UPDATE schedules SET time_scheme_id=NULL WHERE id=?", arrayOf(scheduleId))
+        db.execSQL("DELETE FROM courses WHERE schedule_id=?", arrayOf(scheduleId))
+        oldSchemeId?.let { db.execSQL("DELETE FROM time_schemes WHERE id=?", arrayOf(it)) }
+        db.execSQL(
+            "UPDATE terms SET name=?, start_date=?, week_count=?, timezone=? WHERE id=?",
+            arrayOf(meta.termName, meta.termStart, meta.weekCount, DEFAULT_TIMEZONE, termId)
+        )
+        val schemeId = createTimeScheme(meta.source, meta.timeSchemeRaw)
+        db.execSQL(
+            "UPDATE schedules SET name=?, week_starts_on=?, time_scheme_id=? WHERE id=?",
+            arrayOf("${meta.source} · 导入课表", meta.weekStartsOn, schemeId, scheduleId)
+        )
+        val stats = insertImportedMeetings(scheduleId, importItems(bundle), emptySet())
+        val result = importResult("overwrite", termId, scheduleId, stats.added, stats.skipped, removedCount)
+        writeImportAudit(meta.source, result)
+        return result
+    }
+
+    private fun importResult(mode: String, termId: String, scheduleId: String, added: Int, skipped: Int, removed: Int): JSONObject = JSONObject()
+        .put("mode", mode)
+        .put("termId", termId)
+        .put("scheduleId", scheduleId)
+        .put("courseCount", countCourses(scheduleId))
+        .put("meetingCount", countMeetings(scheduleId))
+        .put("addedCount", added)
+        .put("skippedCount", skipped)
+        .put("removedCount", removed)
+
+    private fun writeImportAudit(source: String, result: JSONObject) {
+        db.execSQL("INSERT INTO import_audit(source, summary_json) VALUES(?, ?)", arrayOf(source, result.toString()))
+    }
+
+    private fun insertImportedMeetings(scheduleId: String, items: List<JSONObject>, skipSignatures: Set<String>): InsertStats {
+        val courseIds = LinkedHashMap<String, String>()
+        db.rawQuery("SELECT id, name, COALESCE(teacher,'') FROM courses WHERE schedule_id=?", arrayOf(scheduleId)).use { cursor ->
+            while (cursor.moveToNext()) courseIds[courseKey(cursor.getString(1), cursor.getString(2))] = cursor.getString(0)
+        }
+        val seen = linkedSetOf<String>()
+        var added = 0
+        var skipped = 0
+        items.forEach { item ->
+            val signature = meetingSignature(item)
+            if (!seen.add(signature) || signature in skipSignatures) {
+                skipped++
+                return@forEach
+            }
+            val name = stringValue(item, "name")
+            if (name.isBlank()) return@forEach
+            val teacher = stringValue(item, "teacher")
+            val key = courseKey(name, teacher)
+            val courseId = courseIds[key] ?: UUID.randomUUID().toString().also { id ->
+                db.execSQL(
+                    "INSERT INTO courses(id, schedule_id, name, teacher, color_token) VALUES(?, ?, ?, ?, 'auto')",
+                    arrayOf(id, scheduleId, name, teacher.takeIf(String::isNotEmpty))
+                )
+                courseIds[key] = id
+            }
+            val startSection = item.optInt("startSection", 1).coerceIn(1, 30)
+            val endSection = item.optInt("endSection", startSection).coerceIn(startSection, 30)
+            db.execSQL(
+                "INSERT INTO course_meetings(id, course_id, weekday, start_section, end_section, start_time, end_time, weeks_mask, location) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                arrayOf(
+                    UUID.randomUUID().toString(),
+                    courseId,
+                    item.optInt("weekday", item.optInt("day", 1)).coerceIn(1, 7),
+                    startSection,
+                    endSection,
+                    stringValue(item, "startTime").ifBlank { stringValue(item, "start") }.takeIf(String::isNotEmpty),
+                    stringValue(item, "endTime").ifBlank { stringValue(item, "end") }.takeIf(String::isNotEmpty),
+                    maskFromWeeks(normalizeWeeks(item.optJSONArray("weeks"))),
+                    stringValue(item, "location").ifBlank { stringValue(item, "room") }.takeIf(String::isNotEmpty)
+                )
+            )
+            added++
+        }
+        return InsertStats(added, skipped)
+    }
+
+    private fun importMeta(bundle: JSONObject): ImportMeta {
+        val source = stringValue(bundle, "source").ifBlank { "import" }
+        val termName = stringValue(bundle, "termName").ifBlank { "导入学期" }
+        val termStart = stringValue(bundle, "termStart")
+        val courses = importItems(bundle)
+        val metadata = bundle.optJSONObject("metadata") ?: JSONObject()
+        val configRaw = stringValue(metadata, "courseConfig")
+        val config = configRaw.takeIf { it.isNotBlank() }?.let { runCatching { JSONObject(it) }.getOrNull() }
+        var weekCount = config?.optInt("semesterTotalWeeks", 0)?.takeIf { it > 0 } ?: 0
+        if (weekCount == 0) {
+            courses.forEach { item ->
+                val weeks = item.optJSONArray("weeks") ?: return@forEach
+                for (index in 0 until weeks.length()) weekCount = maxOf(weekCount, weeks.optInt(index))
+            }
+        }
+        if (weekCount <= 0) weekCount = 20
+        val weekStartsOn = config?.optInt("firstDayOfWeek", 1)?.coerceIn(1, 7) ?: 1
+        val timeSchemeRaw = stringValue(metadata, "timeScheme").takeIf { it.isNotBlank() && parseSlots(it) != null }
+        return ImportMeta(source, termName, termStart, weekCount.coerceIn(1, 64), weekStartsOn, timeSchemeRaw)
+    }
+
+    private fun importItems(bundle: JSONObject): List<JSONObject> {
+        val array = bundle.optJSONArray("courses") ?: JSONArray()
+        return (0 until array.length()).mapNotNull { index ->
+            array.optJSONObject(index)?.takeIf { stringValue(it, "name").isNotBlank() }
+        }
+    }
+
+    private fun meetingSignature(item: JSONObject): String {
+        val name = stringValue(item, "name").lowercase()
+        val teacher = stringValue(item, "teacher").lowercase()
+        val location = stringValue(item, "location").ifBlank { stringValue(item, "room") }.lowercase()
+        val day = item.optInt("weekday", item.optInt("day", 1)).coerceIn(1, 7)
+        val startSection = item.optInt("startSection", 1).coerceIn(1, 30)
+        val endSection = item.optInt("endSection", startSection).coerceIn(startSection, 30)
+        val weeks = normalizeWeeks(item.optJSONArray("weeks")).joinToString(",")
+        return listOf(name, teacher, location, day, startSection, endSection, weeks).joinToString("\u001f")
+    }
+
+    private fun meetingsConflict(left: JSONObject, right: JSONObject): Boolean {
+        val leftDay = left.optInt("weekday", left.optInt("day", 1)).coerceIn(1, 7)
+        val rightDay = right.optInt("weekday", right.optInt("day", 1)).coerceIn(1, 7)
+        if (leftDay != rightDay) return false
+        val leftStart = left.optInt("startSection", 1).coerceIn(1, 30)
+        val leftEnd = left.optInt("endSection", leftStart).coerceIn(leftStart, 30)
+        val rightStart = right.optInt("startSection", 1).coerceIn(1, 30)
+        val rightEnd = right.optInt("endSection", rightStart).coerceIn(rightStart, 30)
+        if (leftStart > rightEnd || rightStart > leftEnd) return false
+        val leftMask = maskFromWeeks(normalizeWeeks(left.optJSONArray("weeks")))
+        val rightMask = maskFromWeeks(normalizeWeeks(right.optJSONArray("weeks")))
+        return (leftMask and rightMask) != 0L
+    }
+
+    private fun courseKey(item: JSONObject): String = courseKey(stringValue(item, "name"), stringValue(item, "teacher"))
+    private fun courseKey(name: String, teacher: String): String = "${name.trim().lowercase()}\u001f${teacher.trim().lowercase()}"
+
+    private fun createTimeScheme(source: String, raw: String?): String? {
+        if (raw.isNullOrBlank() || parseSlots(raw) == null) return null
+        val id = UUID.randomUUID().toString()
+        db.execSQL("INSERT INTO time_schemes(id, name, sections_json) VALUES(?, ?, ?)", arrayOf(id, "$source · 导入作息", raw))
+        return id
+    }
+
+    private fun schedulePreferencesUnlocked(): JSONObject {
+        val display = getSettingRawUnlocked(SCHEDULE_DISPLAY_KEY)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        val result = JSONObject()
+            .put("hasSchedule", false)
+            .put("termName", "")
+            .put("termStart", "")
+            .put("weekCount", 20)
+            .put("timezone", DEFAULT_TIMEZONE)
+            .put("weekStartsOn", 1)
+            .put("showWeekend", display.optBoolean("showWeekend", true))
+            .put("showTeacher", display.optBoolean("showTeacher", true))
+            .put("showRoom", display.optBoolean("showRoom", true))
+            .put("showTime", display.optBoolean("showTime", true))
+            .put("compactMode", display.optBoolean("compactMode", false))
+            .put("defaultSections", display.optInt("defaultSections", 12).coerceIn(8, 30))
+        val scheduleId = latestScheduleId() ?: return result
+        db.rawQuery(
+            "SELECT t.name, t.start_date, t.week_count, t.timezone, s.week_starts_on FROM schedules s JOIN terms t ON t.id=s.term_id WHERE s.id=? LIMIT 1",
+            arrayOf(scheduleId)
+        ).use { cursor ->
+            if (cursor.moveToFirst()) {
+                result.put("hasSchedule", true)
+                    .put("termName", cursor.getString(0))
+                    .put("termStart", cursor.getString(1))
+                    .put("weekCount", cursor.getInt(2).coerceIn(1, 64))
+                    .put("timezone", cursor.getString(3).takeIf { it.isNotBlank() } ?: DEFAULT_TIMEZONE)
+                    .put("weekStartsOn", cursor.getInt(4).coerceIn(1, 7))
+            }
+        }
+        return result
+    }
+
+    private fun getSettingRawUnlocked(key: String): String? = db.rawQuery("SELECT value_json FROM settings WHERE key=? LIMIT 1", arrayOf(key)).use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(0) else null
+    }
+
+    private fun setSettingRawUnlocked(key: String, rawJson: String) {
+        db.execSQL(
+            "INSERT INTO settings(key, value_json) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json",
+            arrayOf(key, rawJson)
+        )
     }
 
     private fun latestScheduleId(): String? = db.rawQuery("SELECT id FROM schedules ORDER BY rowid DESC LIMIT 1", null).use { cursor ->
@@ -263,10 +514,17 @@ class LumaDatabase(context: Context) : Closeable {
     private fun createManualSchedule(): String {
         val termId = UUID.randomUUID().toString()
         val scheduleId = UUID.randomUUID().toString()
-        db.execSQL("INSERT INTO terms(id, name, start_date, week_count, timezone) VALUES(?, '手动课表', '', 20, 'Asia/Shanghai')", arrayOf(termId))
+        db.execSQL("INSERT INTO terms(id, name, start_date, week_count, timezone) VALUES(?, '手动课表', '', 20, ?)", arrayOf(termId, DEFAULT_TIMEZONE))
         db.execSQL("INSERT INTO schedules(id, term_id, name, week_starts_on) VALUES(?, ?, '手动课表', 1)", arrayOf(scheduleId, termId))
         return scheduleId
     }
+
+    private fun countCourses(scheduleId: String): Int = db.rawQuery("SELECT COUNT(*) FROM courses WHERE schedule_id=?", arrayOf(scheduleId)).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) }
+
+    private fun countMeetings(scheduleId: String): Int = db.rawQuery(
+        "SELECT COUNT(*) FROM course_meetings m JOIN courses c ON c.id=m.course_id WHERE c.schedule_id=?",
+        arrayOf(scheduleId)
+    ).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) }
 
     private fun listScheduleCourses(scheduleId: String): List<JSONObject> {
         val result = ArrayList<JSONObject>()
@@ -294,11 +552,12 @@ class LumaDatabase(context: Context) : Closeable {
         return result
     }
 
-    private fun academicWeek(rawStart: String, weekCount: Int): Int {
+    private fun academicWeek(rawStart: String, weekCount: Int, timezone: String): Int {
         if (rawStart.isBlank()) return UNKNOWN_WEEK
         val normalized = rawStart.trim().take(10).replace('/', '-').replace('.', '-')
         val start = runCatching { LocalDate.parse(normalized) }.getOrNull() ?: return UNKNOWN_WEEK
-        val today = LocalDate.now(ZoneId.of("Asia/Shanghai"))
+        val zone = runCatching { ZoneId.of(timezone) }.getOrDefault(ZoneId.of(DEFAULT_TIMEZONE))
+        val today = LocalDate.now(zone)
         val days = ChronoUnit.DAYS.between(start, today)
         if (days < 0) return OUTSIDE_TERM
         val week = (days / 7 + 1).toInt()
@@ -339,6 +598,12 @@ class LumaDatabase(context: Context) : Closeable {
         return null
     }
 
+    private fun stringValue(obj: JSONObject, key: String): String {
+        val value = obj.opt(key)
+        if (value == null || value == JSONObject.NULL) return ""
+        return value.toString().trim()
+    }
+
     private fun colorFor(name: String): String {
         val colors = arrayOf("violet", "cyan", "amber", "blue", "green", "pink", "orange")
         return colors[(name.hashCode() and Int.MAX_VALUE) % colors.size]
@@ -348,8 +613,21 @@ class LumaDatabase(context: Context) : Closeable {
 
     override fun close() = synchronized(lock) { db.close() }
 
+    private data class ImportMeta(
+        val source: String,
+        val termName: String,
+        val termStart: String,
+        val weekCount: Int,
+        val weekStartsOn: Int,
+        val timeSchemeRaw: String?
+    )
+
+    private data class InsertStats(val added: Int, val skipped: Int)
+
     companion object {
         private const val UNKNOWN_WEEK = 0
         private const val OUTSIDE_TERM = -1
+        private const val DEFAULT_TIMEZONE = "Asia/Shanghai"
+        private const val SCHEDULE_DISPLAY_KEY = "schedule.display"
     }
 }
