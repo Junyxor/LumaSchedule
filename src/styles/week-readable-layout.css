@@ -35,22 +35,54 @@
 
   .page-week .week-board {
     --axis-width: 44px !important;
-    --row-height: 64px !important;
+    --row-height: 66px !important;
     flex: none !important;
     overflow: visible !important;
     border-radius: 12px !important;
-    background: rgba(255, 255, 255, .16) !important;
+    background: rgba(255, 255, 255, .18) !important;
   }
 
   .page-week .week-board .week-header {
     position: sticky !important;
     top: calc(max(6px, env(safe-area-inset-top)) + 48px);
     z-index: 35;
-    height: 48px !important;
-    background: rgba(248, 248, 252, .90) !important;
+    height: 50px !important;
+    background: rgba(248, 248, 252, .94) !important;
     -webkit-backdrop-filter: blur(18px) saturate(150%);
     backdrop-filter: blur(18px) saturate(150%);
-    box-shadow: 0 1px rgba(60, 60, 67, .045) !important;
+    box-shadow: 0 1px rgba(60, 60, 67, .06) !important;
+  }
+
+  .page-week .week-board .week-header > div {
+    color: rgba(42, 42, 48, .72) !important;
+  }
+
+  .page-week .week-board .week-header > div span {
+    font-size: 10.5px !important;
+    line-height: 1.05 !important;
+    font-weight: 620 !important;
+  }
+
+  .page-week .week-board .week-header > div b {
+    font-size: 13.5px !important;
+    line-height: 1 !important;
+    font-weight: 760 !important;
+    color: rgba(31, 31, 36, .82) !important;
+  }
+
+  .page-week .week-board .week-header .corner {
+    font-size: 9.5px !important;
+    font-weight: 680 !important;
+    color: rgba(42, 42, 48, .58) !important;
+  }
+
+  .page-week .week-board .week-header .today {
+    color: #514bc2 !important;
+    background: rgba(91, 86, 214, .10) !important;
+  }
+
+  .page-week .week-board .week-header .today b {
+    color: #4943bc !important;
   }
 
   .page-week .week-board .week-scroll {
@@ -66,48 +98,79 @@
     min-height: calc(var(--section-count) * var(--row-height)) !important;
   }
 
-  /* One quiet time axis and very soft horizontal references. */
+  /* Keep the time axis secondary, but not so faint that it becomes hard to scan. */
   .page-week .section-time {
     padding: 2px 1px !important;
-    gap: 0 !important;
+    gap: 1px !important;
     border-right: 0 !important;
-    border-bottom: 1px solid rgba(77, 82, 102, .035) !important;
+    border-bottom: 1px solid rgba(77, 82, 102, .05) !important;
     background: transparent !important;
+    color: rgba(48, 48, 55, .68) !important;
   }
 
   .page-week .section-time small {
-    font-size: 6.6px !important;
-    opacity: .72;
+    font-size: 7.6px !important;
+    line-height: 1.05 !important;
+    color: rgba(48, 48, 55, .58) !important;
+    opacity: 1 !important;
   }
 
   .page-week .section-time b {
-    font-size: 8.2px !important;
-    line-height: 1.02 !important;
+    font-size: 9.4px !important;
+    line-height: 1.04 !important;
+    font-weight: 700 !important;
+    color: rgba(34, 34, 40, .76) !important;
   }
 
   .page-week .section-time span {
-    font-size: 6.9px !important;
-    line-height: 1.02 !important;
+    font-size: 8px !important;
+    line-height: 1.04 !important;
+    color: rgba(48, 48, 55, .62) !important;
   }
 
   .page-week .week-cell {
     border-left: 0 !important;
-    border-bottom: 1px solid rgba(77, 82, 102, .032) !important;
+    border-bottom: 1px solid rgba(77, 82, 102, .045) !important;
   }
 
-  /* Course blocks follow the same information hierarchy as mature timetable apps:
-     course name first, then teacher/room metadata, then credits. Nothing gets
-     forced onto one ellipsized line while there is vertical space available. */
+  /* Course blocks should read instantly: larger type, darker text and clearer colors. */
   .page-week .week-body-grid .week-course {
     display: flex !important;
     flex-direction: column !important;
     justify-content: flex-start !important;
-    gap: 1px !important;
+    gap: 2px !important;
     margin: 2px 1.5px !important;
-    padding: 5px 4px !important;
+    padding: 6px 4px !important;
+    border: 1px solid rgba(62, 60, 78, .045) !important;
     border-radius: 8px !important;
     overflow: hidden !important;
+    color: #24232b !important;
     box-shadow: none !important;
+    background: linear-gradient(145deg, #cbc6ff, #aaa2f8) !important;
+  }
+
+  .page-week .week-body-grid .week-course.cyan {
+    background: linear-gradient(145deg, #adebf0, #7fd5df) !important;
+  }
+
+  .page-week .week-body-grid .week-course.amber {
+    background: linear-gradient(145deg, #ffe5a9, #f3c66f) !important;
+  }
+
+  .page-week .week-body-grid .week-course.blue {
+    background: linear-gradient(145deg, #c4e1ff, #8fbeeF) !important;
+  }
+
+  .page-week .week-body-grid .week-course.green {
+    background: linear-gradient(145deg, #c2eccf, #8bd0a5) !important;
+  }
+
+  .page-week .week-body-grid .week-course.pink {
+    background: linear-gradient(145deg, #f5c7e1, #e79bc3) !important;
+  }
+
+  .page-week .week-body-grid .week-course.orange {
+    background: linear-gradient(145deg, #f7c7aa, #e99a6d) !important;
   }
 
   .page-week .week-body-grid .week-course b {
@@ -118,8 +181,10 @@
     white-space: normal !important;
     word-break: break-word !important;
     overflow-wrap: anywhere !important;
-    font-size: 9.4px !important;
-    line-height: 1.15 !important;
+    font-size: 11.2px !important;
+    line-height: 1.16 !important;
+    font-weight: 760 !important;
+    color: #24232b !important;
   }
 
   .page-week .week-body-grid .week-course span {
@@ -130,35 +195,41 @@
     white-space: normal !important;
     word-break: break-word !important;
     overflow-wrap: anywhere !important;
-    font-size: 7.7px !important;
-    line-height: 1.12 !important;
-    opacity: .78 !important;
+    font-size: 9px !important;
+    line-height: 1.14 !important;
+    font-weight: 540 !important;
+    color: rgba(36, 35, 43, .78) !important;
+    opacity: 1 !important;
   }
 
   .page-week .week-body-grid .week-course .course-credit {
     display: block !important;
     margin-top: 1px !important;
-    font-size: 7.6px !important;
-    line-height: 1.08 !important;
-    font-weight: 700 !important;
-    opacity: .82 !important;
+    font-size: 8.7px !important;
+    line-height: 1.1 !important;
+    font-weight: 720 !important;
+    color: rgba(36, 35, 43, .74) !important;
+    opacity: 1 !important;
   }
 
   .page-week .week-board.compact {
-    --row-height: 58px !important;
+    --row-height: 60px !important;
   }
 
   .page-week .week-board.compact .week-course {
     margin: 1.5px 1px !important;
-    padding: 4px 3px !important;
+    padding: 5px 3px !important;
   }
 
   .page-week .week-board.compact .week-course b {
-    font-size: 8.8px !important;
+    font-size: 10.3px !important;
   }
 
-  .page-week .week-board.compact .week-course span,
+  .page-week .week-board.compact .week-course span {
+    font-size: 8.2px !important;
+  }
+
   .page-week .week-board.compact .week-course .course-credit {
-    font-size: 7.1px !important;
+    font-size: 8px !important;
   }
 }
