@@ -2,12 +2,16 @@
   import { MapPin, ShieldCheck, Sparkles } from 'lucide-svelte';
   import { onDestroy, onMount } from 'svelte';
   import CoursePill from '../components/CoursePill.svelte';
-  import type { Course } from '../types';
+  import type { Course, SchedulePreferences } from '../types';
 
   export let courses: Course[];
   export let hasSchedule = false;
   export let currentWeek: number | null | undefined = null;
   export let termName: string | null | undefined = null;
+  export let preferences: SchedulePreferences = {
+    hasSchedule: false, termName: '', termStart: '', weekCount: 20, timezone: 'Asia/Shanghai', weekStartsOn: 1,
+    showWeekend: true, showTeacher: true, showRoom: true, showTime: true, compactMode: false, defaultSections: 12
+  };
 
   let now = new Date();
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -21,6 +25,15 @@
     const parsed = minutes(course.start);
     return Number.isFinite(parsed) ? parsed : course.startSection * 60;
   };
+
+  function locationTeacher(course: Course) {
+    return [preferences.showRoom ? (course.room || '教室待定') : '', preferences.showTeacher ? course.teacher : ''].filter(Boolean).join(' · ');
+  }
+
+  function displayTime(course: Course) {
+    if (!preferences.showTime) return `第${course.startSection}–${course.endSection}节`;
+    return course.start || `第${course.startSection}节`;
+  }
 
   onMount(() => { timer = setInterval(() => (now = new Date()), 60_000); });
   onDestroy(() => { if (timer) clearInterval(timer); });
@@ -44,7 +57,7 @@
   $: emptyMessage = hasSchedule ? '课表已经保存在本地；当前周可能暂无课程，或不在教学周内。' : '前往「导入」添加学校教务课表或课表文件。';
 </script>
 
-<section class="page page-today">
+<section class="page page-today" class:compact-today={preferences.compactMode}>
   <header class="topbar today-topbar">
     <div>
       <span class="eyebrow">{dateLabel}</span>
@@ -57,8 +70,8 @@
     <article class="next-card glass-panel refract apple-hero">
       <div class="next-card-top"><span class="soft-badge"><Sparkles size={14} /> {nextProgress > 0 ? '正在上课' : '下一节课程'}</span></div>
       <div class="next-main">
-        <div><h2>{nextCourse.name}</h2><p><MapPin size={16} /> {nextCourse.room || '教室待定'}{nextCourse.teacher ? ` · ${nextCourse.teacher}` : ''}</p></div>
-        <div class="time-block"><b>{nextCourse.start || `第${nextCourse.startSection}节`}</b><span>— {nextCourse.end || `第${nextCourse.endSection}节`}</span></div>
+        <div><h2>{nextCourse.name}</h2>{#if locationTeacher(nextCourse)}<p><MapPin size={16} /> {locationTeacher(nextCourse)}</p>{/if}</div>
+        <div class="time-block"><b>{displayTime(nextCourse)}</b>{#if preferences.showTime}<span>— {nextCourse.end || `第${nextCourse.endSection}节`}</span>{/if}</div>
       </div>
       <div class="progress"><i style={`width:${nextProgress}%`}></i></div>
       <div class="next-bottom"><span>本地课表 · 离线可用</span>{#if currentWeek}<span>第 {currentWeek} 周</span>{/if}</div>
@@ -75,7 +88,7 @@
     <div class="timeline-card content-surface">
       <div class="timeline-courses">
         {#each todayCourses as course}
-          <CoursePill name={course.name} room={course.room || '教室待定'} time={course.start || `第${course.startSection}节`} color={course.color} />
+          <CoursePill name={course.name} room={locationTeacher(course)} time={displayTime(course)} color={course.color} compact={preferences.compactMode} />
         {/each}
         {#if !todayCourses.length}<div class="empty-day">{hasSchedule ? '当前没有今天的课程。' : '导入课表后，这里会显示当天课程。'}</div>{/if}
       </div>
@@ -86,3 +99,8 @@
     </aside>
   </div>
 </section>
+
+<style>
+  .compact-today .timeline-card { padding-top: 4px; padding-bottom: 4px; }
+  .compact-today .quick-card { min-height: 84px; }
+</style>
