@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CalendarDays, ChevronLeft, ChevronRight, Settings2 } from 'lucide-svelte';
+  import { ChevronLeft, ChevronRight } from 'lucide-svelte';
   import { createEventDispatcher, onMount } from 'svelte';
   import WeekCore from './WeekCore.svelte';
   import { getFullScheduleSnapshot } from '../weekSchedule';
@@ -130,50 +130,43 @@
   $: weekCourses = allCourses.filter((course) => !course.weeks?.length || course.weeks.includes(selectedWeek));
   $: currentTeachingWeek = derivedCurrentWeek();
   $: weekOptions = Array.from({ length: fullWeekCount }, (_, index) => index + 1);
-  $: chipWeeks = weekOptions.filter((week) => Math.abs(week - selectedWeek) <= 2);
   $: selectedWeekStart = weekStart(selectedWeek);
 </script>
 
 <section class="page page-week week-shell">
-  <header class="week-page-head">
-    <div class="week-heading">
-      <span class="eyebrow">{rangeLabel(selectedWeek)}</span>
-      <div class="week-title-line"><h1>第 {selectedWeek} 周</h1>{#if selectedWeek === currentTeachingWeek}<span>本周</span>{/if}</div>
-      <p>{fullTermName || (fullTermStart ? '当前学期' : '尚未设置学期')} · {weekCourses.length ? `${weekCourses.length} 个课程时段` : '暂无课程'}</p>
-    </div>
-  </header>
-
-  <div class="week-switchbar glass-panel" aria-label="一键切换教学周">
-    <button class="week-switch previous" on:click={() => selectWeek(selectedWeek - 1)} disabled={selectedWeek <= 1} aria-label="上一周">
-      <ChevronLeft size={19}/>
-      <span><small>上一周</small><b>{selectedWeek > 1 ? `第 ${selectedWeek - 1} 周` : '已经是首周'}</b></span>
-    </button>
-    <label class="week-jump">
-      <span><b>第 {selectedWeek} 周</b><small>{shortDate(selectedWeekStart)} · 点这里跳周</small></span>
-      <select value={selectedWeek} on:change={(event) => selectWeek(Number(event.currentTarget.value))} aria-label="直接跳转到指定周">
-        {#each weekOptions as week}<option value={week}>第 {week} 周 · {shortDate(weekStart(week))}</option>{/each}
-      </select>
-    </label>
-    <button class="week-switch next" on:click={() => selectWeek(selectedWeek + 1)} disabled={selectedWeek >= fullWeekCount} aria-label="下一周">
-      <span><small>下一周</small><b>{selectedWeek < fullWeekCount ? `第 ${selectedWeek + 1} 周` : '已经是末周'}</b></span>
-      <ChevronRight size={19}/>
-    </button>
-  </div>
-
-  <div class="week-strip glass-panel" aria-label="附近教学周">
-    {#each chipWeeks as week}
-      <button class:active={week === selectedWeek} class:current={week === currentTeachingWeek} on:click={() => selectWeek(week)}>
-        <span>第 {week} 周</span><small>{shortDate(weekStart(week))}</small>
+  <div class="week-nav glass-panel" aria-label="教学周导航">
+    <div class="week-nav-main">
+      <button class="week-arrow" on:click={() => selectWeek(selectedWeek - 1)} disabled={selectedWeek <= 1} aria-label="上一周">
+        <ChevronLeft size={22}/>
       </button>
-    {/each}
-    {#if selectedWeek !== currentTeachingWeek}<button class="back-current" on:click={() => selectWeek(currentTeachingWeek)}><CalendarDays size={14}/> 回本周</button>{/if}
-  </div>
 
-  {#if !fullTermStart}
-    <button class="term-start-hint content-surface" on:click={() => dispatch('openSettings')}>
-      <Settings2 size={17}/><span><b>设置开学日期</b><small>设置后会自动计算当前教学周，并让每周日期准确对应。</small></span><ChevronRight size={17}/>
-    </button>
-  {/if}
+      <label class="week-jump">
+        <span class="week-range">{rangeLabel(selectedWeek)}</span>
+        <span class="week-title-row">
+          <b>第 {selectedWeek} 周</b>
+          {#if selectedWeek === currentTeachingWeek}<em>本周</em>{/if}
+        </span>
+        <small>{fullTermName || (fullTermStart ? '当前学期' : '尚未设置学期')} · {weekCourses.length ? `${weekCourses.length} 个课程时段` : '暂无课程'} · 点击跳周</small>
+        <select value={selectedWeek} on:change={(event) => selectWeek(Number(event.currentTarget.value))} aria-label="直接跳转到指定周">
+          {#each weekOptions as week}<option value={week}>第 {week} 周 · {shortDate(weekStart(week))}</option>{/each}
+        </select>
+      </label>
+
+      <button class="week-arrow" on:click={() => selectWeek(selectedWeek + 1)} disabled={selectedWeek >= fullWeekCount} aria-label="下一周">
+        <ChevronRight size={22}/>
+      </button>
+    </div>
+
+    <div class="week-nav-meta">
+      <span>共 {fullWeekCount} 周</span>
+      {#if !fullTermStart}
+        <button on:click={() => dispatch('openSettings')}>设置开学日期</button>
+      {/if}
+      {#if selectedWeek !== currentTeachingWeek}
+        <button on:click={() => selectWeek(currentTeachingWeek)}>回本周</button>
+      {/if}
+    </div>
+  </div>
 
   <div class="week-board-swipe" on:pointerdown={beginSwipe} on:pointerup={endSwipe} on:pointercancel={cancelSwipe}>
     <WeekCore
@@ -192,53 +185,175 @@
 </section>
 
 <style>
-  .week-shell { display:grid; gap:12px; }
-  .week-page-head { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; }
-  .week-heading { min-width:0; }
-  .week-heading .eyebrow { display:block; color:rgba(60,60,67,.56); font-size:12px; margin-bottom:4px; }
-  .week-title-line { display:flex; align-items:center; gap:9px; }
-  .week-title-line h1 { margin:0; font-size:38px; line-height:1; letter-spacing:-.055em; }
-  .week-title-line span { padding:4px 8px; border-radius:999px; background:rgba(91,86,214,.11); color:#5751c9; font-size:10px; font-weight:700; }
-  .week-heading p { margin:7px 0 0; color:rgba(60,60,67,.54); font-size:12px; }
-  .week-switchbar { position:sticky; top:8px; z-index:18; display:grid; grid-template-columns:minmax(112px,1fr) minmax(126px,1.05fr) minmax(112px,1fr); gap:6px; padding:6px; border-radius:20px; }
-  .week-switchbar button,.week-jump { min-width:0; min-height:50px; border:0; border-radius:15px; color:inherit; }
-  .week-switch { display:flex; align-items:center; gap:7px; padding:0 11px; background:rgba(118,118,128,.07); }
-  .week-switch.next { justify-content:flex-end; text-align:right; }
-  .week-switch span,.week-jump > span { min-width:0; display:grid; gap:1px; }
-  .week-switch small,.week-jump small { color:rgba(60,60,67,.48); font-size:9px; font-weight:500; }
-  .week-switch b,.week-jump b { font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .week-switch > svg { flex:none; color:#5751c9; }
-  .week-switch:disabled { opacity:.30; }
-  .week-jump { position:relative; display:grid; place-items:center; text-align:center; background:rgba(91,86,214,.11); color:#514bd0; cursor:pointer; }
-  .week-jump select { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
-  .week-strip { display:flex; gap:6px; padding:6px; border-radius:18px; overflow-x:auto; scrollbar-width:none; }
-  .week-strip::-webkit-scrollbar { display:none; }
-  .week-strip button { flex:0 0 auto; min-width:70px; min-height:44px; border:0; border-radius:13px; background:transparent; color:inherit; display:grid; place-content:center; gap:1px; }
-  .week-strip button span { font-size:10px; font-weight:650; }
-  .week-strip button small { font-size:8px; color:rgba(60,60,67,.48); }
-  .week-strip button.active { background:rgba(91,86,214,.12); color:#514bd0; }
-  .week-strip button.current:not(.active) { box-shadow:inset 0 0 0 1px rgba(91,86,214,.20); }
-  .week-strip .back-current { margin-left:auto; min-width:auto; padding:0 10px; display:flex; align-items:center; gap:5px; color:#5751c9; }
-  .term-start-hint { width:100%; min-height:58px; border:0; border-radius:18px; padding:10px 14px; display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; color:inherit; text-align:left; }
-  .term-start-hint > span { display:grid; gap:2px; }
-  .term-start-hint b { font-size:11px; }
-  .term-start-hint small { font-size:9px; line-height:1.45; color:rgba(60,60,67,.52); }
-  .term-start-hint > svg:first-child { color:#5b56d6; }
-  .term-start-hint > svg:last-child { color:rgba(60,60,67,.35); }
-  .week-board-swipe { touch-action:pan-y; }
-  .week-loading { text-align:center; color:rgba(60,60,67,.45); font-size:10px; }
+  .week-shell {
+    display:grid;
+    gap:8px;
+  }
+
+  .week-nav {
+    padding:7px 9px 6px;
+    border-radius:20px;
+  }
+
+  .week-nav-main {
+    display:grid;
+    grid-template-columns:42px minmax(0,1fr) 42px;
+    align-items:center;
+    gap:5px;
+  }
+
+  .week-arrow {
+    width:42px;
+    height:52px;
+    border:0;
+    border-radius:15px;
+    display:grid;
+    place-items:center;
+    background:rgba(118,118,128,.065);
+    color:#5751c9;
+  }
+
+  .week-arrow:disabled {
+    opacity:.26;
+  }
+
+  .week-jump {
+    position:relative;
+    min-width:0;
+    min-height:58px;
+    padding:5px 10px 4px;
+    border-radius:16px;
+    display:grid;
+    place-items:center;
+    align-content:center;
+    gap:1px;
+    text-align:center;
+    background:rgba(91,86,214,.09);
+    color:inherit;
+    cursor:pointer;
+  }
+
+  .week-range {
+    color:rgba(60,60,67,.52);
+    font-size:9px;
+    line-height:1.2;
+  }
+
+  .week-title-row {
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    min-width:0;
+  }
+
+  .week-title-row b {
+    font-size:23px;
+    line-height:1.08;
+    letter-spacing:-.045em;
+  }
+
+  .week-title-row em {
+    padding:3px 6px;
+    border-radius:999px;
+    background:rgba(91,86,214,.13);
+    color:#5751c9;
+    font-size:8px;
+    font-style:normal;
+    font-weight:750;
+  }
+
+  .week-jump small {
+    max-width:100%;
+    color:rgba(60,60,67,.46);
+    font-size:8px;
+    line-height:1.2;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  .week-jump select {
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+    opacity:0;
+    cursor:pointer;
+  }
+
+  .week-nav-meta {
+    min-height:22px;
+    margin-top:3px;
+    padding:0 5px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    color:rgba(60,60,67,.45);
+    font-size:8px;
+  }
+
+  .week-nav-meta button {
+    min-height:22px;
+    padding:0 8px;
+    border:0;
+    border-radius:999px;
+    background:rgba(91,86,214,.09);
+    color:#5751c9;
+    font-size:8px;
+    font-weight:650;
+  }
+
+  .week-board-swipe {
+    min-height:0;
+    touch-action:pan-y;
+  }
+
+  .week-loading {
+    text-align:center;
+    color:rgba(60,60,67,.45);
+    font-size:10px;
+  }
+
   @media (max-width:760px) {
-    .week-shell { gap:10px; }
-    .week-page-head { align-items:center; gap:10px; }
-    .week-title-line h1 { font-size:34px; }
-    .week-heading p { max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .week-switchbar { top:calc(env(safe-area-inset-top) + 4px); grid-template-columns:1fr 1.05fr 1fr; gap:5px; padding:5px; border-radius:18px; }
-    .week-switchbar button,.week-jump { min-height:48px; border-radius:14px; }
-    .week-switch { gap:4px; padding:0 7px; }
-    .week-switch small { font-size:8px; }
-    .week-switch b { font-size:10px; }
-    .week-jump b { font-size:11px; }
-    .week-jump small { font-size:8px; }
-    .week-strip { margin-top:-2px; }
+    .week-shell {
+      gap:7px;
+    }
+
+    .week-nav {
+      padding:6px 8px 5px;
+      border-radius:18px;
+    }
+
+    .week-nav-main {
+      grid-template-columns:38px minmax(0,1fr) 38px;
+      gap:4px;
+    }
+
+    .week-arrow {
+      width:38px;
+      height:48px;
+      border-radius:14px;
+    }
+
+    .week-jump {
+      min-height:54px;
+      padding:4px 8px;
+      border-radius:14px;
+    }
+
+    .week-title-row b {
+      font-size:21px;
+    }
+
+    .week-nav-meta {
+      min-height:20px;
+      margin-top:2px;
+    }
+
+    .week-nav-meta button {
+      min-height:20px;
+    }
   }
 </style>
