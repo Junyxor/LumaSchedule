@@ -3,6 +3,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val lumaVersionName = System.getenv("LUMA_VERSION_NAME")?.trim()?.takeIf { it.isNotEmpty() } ?: "0.1.0"
+val lumaVersionCode = System.getenv("LUMA_VERSION_CODE")?.toIntOrNull()?.takeIf { it in 1..2_100_000_000 } ?: 1000
+
 android {
     namespace = "com.lumaschedule.app"
     compileSdk = 36
@@ -11,8 +14,8 @@ android {
         applicationId = "com.lumaschedule.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0-native"
+        versionCode = lumaVersionCode
+        versionName = lumaVersionName
     }
 
     val keyPath = System.getenv("LUMA_KEYSTORE_PATH")

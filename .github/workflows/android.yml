@@ -12,6 +12,14 @@ on:
         required: false
         type: boolean
         default: false
+      version:
+        description: 'Version for a manual signed build, e.g. 0.1.0'
+        required: false
+        type: string
+        default: '0.1.0'
+
+permissions:
+  contents: read
 
 jobs:
   test-release-apk:
@@ -41,6 +49,8 @@ jobs:
       - run: npm install
       - name: Validate Android SQLite API usage
         run: node scripts/validate-android-sqlite-usage.mjs
+      - name: Smoke test WakeUp profile converter
+        run: node scripts/test-wakeup-school-info.mjs
       - name: Bundle current university adapters
         env:
           SHIGUANG_SOURCE: .upstream/shiguang_warehouse
@@ -49,11 +59,14 @@ jobs:
         run: node scripts/validate-shiguang-contract.mjs
       - name: Smoke test GDUT adapter
         run: node scripts/test-gdut-adapter.mjs
+      - name: Check frontend
+        run: npm run check
       - name: Build Svelte assets
         run: npm run build
       - name: Create ephemeral test signing key
         shell: bash
         run: |
+          set -euo pipefail
           keytool -genkeypair -v \
             -keystore "$RUNNER_TEMP/lumaschedule-test.jks" \
             -storepass lumaschedule-test \
@@ -63,11 +76,24 @@ jobs:
             -dname "CN=LumaSchedule Test, OU=CI, O=LumaSchedule, L=Guangzhou, ST=Guangdong, C=CN"
       - name: Build native Release APK
         env:
+          LUMA_VERSION_NAME: 0.1.0-test
+          LUMA_VERSION_CODE: 999
           LUMA_KEYSTORE_PATH: ${{ runner.temp }}/lumaschedule-test.jks
           LUMA_KEY_ALIAS: lumaschedule-test
           LUMA_KEY_PASSWORD: lumaschedule-test
           LUMA_STORE_PASSWORD: lumaschedule-test
         run: gradle -p android-native :app:assembleRelease --no-daemon --stacktrace
+      - name: Verify test APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find android-native/app/build/outputs/apk/release -name '*.apk' -type f | head -n 1)"
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          if unzip -l "$APK" | grep -Eq ' lib/.*\.so$'; then
+            echo '::error::Native shared libraries unexpectedly found in APK.'
+            exit 1
+          fi
       - name: Report APK size
         shell: bash
         run: |
@@ -78,12 +104,33 @@ jobs:
           name: lumaschedule-android-native-test-release
           path: android-native/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+          retention-days: 14
 
   signed-release:
     if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.release) }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            TAG="$GITHUB_REF_NAME"
+            [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Release tag must look like v0.1.0"; exit 1; }
+            VERSION="${TAG#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+            [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Manual release version must look like 0.1.0"; exit 1; }
+          fi
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          CODE=$((10#$MAJOR * 1000000 + 10#$MINOR * 1000 + 10#$PATCH))
+          test "$CODE" -gt 0 || CODE=1
+          echo "LUMA_VERSION_NAME=$VERSION" >> "$GITHUB_ENV"
+          echo "LUMA_VERSION_CODE=$CODE" >> "$GITHUB_ENV"
+          echo "Resolved version $VERSION ($CODE)"
       - name: Checkout Shiguang adapter warehouse
         uses: actions/checkout@v4
         with:
@@ -106,6 +153,8 @@ jobs:
       - run: npm install
       - name: Validate Android SQLite API usage
         run: node scripts/validate-android-sqlite-usage.mjs
+      - name: Smoke test WakeUp profile converter
+        run: node scripts/test-wakeup-school-info.mjs
       - name: Bundle current university adapters
         env:
           SHIGUANG_SOURCE: .upstream/shiguang_warehouse
@@ -114,7 +163,10 @@ jobs:
         run: node scripts/validate-shiguang-contract.mjs
       - name: Smoke test GDUT adapter
         run: node scripts/test-gdut-adapter.mjs
-      - run: npm run build
+      - name: Check frontend
+        run: npm run check
+      - name: Build Svelte assets
+        run: npm run build
       - name: Restore Android signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -123,27 +175,61 @@ jobs:
           STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
         shell: bash
         run: |
+          set -euo pipefail
           test -n "$KEYSTORE_BASE64" || (echo "::error::ANDROID_KEYSTORE_BASE64 is missing" && exit 1)
           test -n "$KEY_ALIAS" || (echo "::error::ANDROID_KEY_ALIAS is missing" && exit 1)
           test -n "$KEY_PASSWORD" || (echo "::error::ANDROID_KEY_PASSWORD is missing" && exit 1)
           test -n "$STORE_PASSWORD" || (echo "::error::ANDROID_STORE_PASSWORD is missing" && exit 1)
+          umask 077
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/lumaschedule-release.jks"
           test -s "$RUNNER_TEMP/lumaschedule-release.jks" || (echo "::error::Decoded Android keystore is empty" && exit 1)
+          keytool -list -keystore "$RUNNER_TEMP/lumaschedule-release.jks" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
       - name: Build signed native APK and AAB
         env:
+          LUMA_VERSION_NAME: ${{ env.LUMA_VERSION_NAME }}
+          LUMA_VERSION_CODE: ${{ env.LUMA_VERSION_CODE }}
           LUMA_KEYSTORE_PATH: ${{ runner.temp }}/lumaschedule-release.jks
           LUMA_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           LUMA_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           LUMA_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
         run: gradle -p android-native :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace
-      - name: Report release sizes
+      - name: Verify and stage signed release
         shell: bash
         run: |
-          find android-native/app/build/outputs \( -name '*.apk' -o -name '*.aab' \) -type f -print0 | xargs -0 -r ls -lh
+          set -euo pipefail
+          APK="$(find android-native/app/build/outputs/apk/release -name '*.apk' -type f | head -n 1)"
+          AAB="$(find android-native/app/build/outputs/bundle/release -name '*.aab' -type f | head -n 1)"
+          test -n "$APK" && test -n "$AAB"
+          mkdir -p release
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee release/SIGNING-CERTIFICATE.txt
+          jarsigner -verify -strict "$AAB" >/dev/null
+          if unzip -l "$APK" | grep -Eq ' lib/.*\.so$'; then
+            echo '::error::Native shared libraries unexpectedly found in release APK.'
+            exit 1
+          fi
+          cp "$APK" "release/LumaSchedule-v${LUMA_VERSION_NAME}.apk"
+          cp "$AAB" "release/LumaSchedule-v${LUMA_VERSION_NAME}.aab"
+          sha256sum release/*.apk release/*.aab > release/SHA256SUMS.txt
+          ls -lh release
+          cat release/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: lumaschedule-android-native-release
-          path: |
-            android-native/app/build/outputs/apk/release/*.apk
-            android-native/app/build/outputs/bundle/release/*.aab
+          name: lumaschedule-android-release-${{ env.LUMA_VERSION_NAME }}
+          path: release/*
           if-no-files-found: error
+          retention-days: 90
+      - name: Publish GitHub Release
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "LumaSchedule $GITHUB_REF_NAME" \
+              --generate-notes
+          fi
