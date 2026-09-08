@@ -27,6 +27,34 @@ for (const marker of requiredCore) {
   }
 }
 
+const activeRangeMarkers = [
+  'const TIMELINE_PADDING_MINUTES = 30',
+  'const MIN_TIMELINE_SPAN = 4 * 60',
+  'function paddedTimelineRange(',
+  'visibleStartMinutes = visibleCourses.map((course) => courseStartMinute(course))',
+  'visibleEndMinutes = visibleCourses.map((course) => courseEndMinute(course))',
+  'timelineRange = paddedTimelineRange(earliestVisible, latestVisible, visibleCourses.length > 0)',
+  'timelineSections = sections.filter((section) =>',
+  '{#each timelineSections as section}'
+];
+
+for (const marker of activeRangeMarkers) {
+  if (!core.includes(marker)) {
+    console.error(`Week active-range regression: missing ${marker}`);
+    process.exit(1);
+  }
+}
+
+if (core.includes('Math.max(preferences.defaultSections || 12, ...timeReferenceCourses')) {
+  console.error('Week active-range regression: default section count must not force every populated week to run until evening.');
+  process.exit(1);
+}
+
+if (core.includes('Math.max(latestKnown + 10, inferredSectionEnd(sectionCount))')) {
+  console.error('Week active-range regression: full-term inferred end time must not stretch the selected week timeline.');
+  process.exit(1);
+}
+
 if (core.includes('left:calc(') || core.includes('left: calc(')) {
   console.error('Week timeline regression: course columns must not use calculated absolute left positioning.');
   process.exit(1);
