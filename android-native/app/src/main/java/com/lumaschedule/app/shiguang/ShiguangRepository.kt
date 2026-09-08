@@ -70,7 +70,8 @@ class ShiguangRepository(private val context: Context) {
             script = script,
             adapterName = "兼容模式 · ${adapter.adapterName}",
             schoolName = displaySchool,
-            captureKind = "schedule"
+            captureKind = "schedule",
+            manualTrigger = true
         )
     }
 
@@ -93,18 +94,24 @@ class ShiguangRepository(private val context: Context) {
         script: String,
         adapterName: String,
         schoolName: String,
-        captureKind: String
+        captureKind: String,
+        manualTrigger: Boolean = false
     ): JSONObject {
         val allowedHosts = collectLoginHosts(importUrl)
         require(allowedHosts.isNotEmpty()) { "无法从登录地址确定允许访问的教务域名" }
         val insecure = containsHttpUrl(importUrl)
         val sessionId = UUID.randomUUID().toString()
         val sha = sha256(script)
+        val initialMessage = when {
+            captureKind == "grades" -> "请登录教务系统并进入成绩查询页面，然后点击抓取成绩。"
+            manualTrigger -> "请登录教务系统并进入个人课表页面，查询课表后点击尝试抓取。"
+            else -> "正在打开教务登录窗口…"
+        }
 
         val prefs = context.getSharedPreferences(ShiguangImportActivity.PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit()
             .putString(ShiguangImportActivity.key(sessionId, "status"), "running")
-            .putString(ShiguangImportActivity.key(sessionId, "message"), if (captureKind == "grades") "请登录教务系统并进入成绩查询页面，然后点击抓取成绩。" else "正在打开教务登录窗口…")
+            .putString(ShiguangImportActivity.key(sessionId, "message"), initialMessage)
             .putString(ShiguangImportActivity.key(sessionId, "adapter_name"), adapterName)
             .putString(ShiguangImportActivity.key(sessionId, "school_name"), schoolName)
             .putString(ShiguangImportActivity.key(sessionId, "source_sha256"), sha)
@@ -120,6 +127,7 @@ class ShiguangRepository(private val context: Context) {
             putExtra(ShiguangImportActivity.EXTRA_SCHOOL_NAME, schoolName)
             putExtra(ShiguangImportActivity.EXTRA_INSECURE_TRANSPORT, insecure)
             putExtra(ShiguangImportActivity.EXTRA_CAPTURE_KIND, captureKind)
+            putExtra(ShiguangImportActivity.EXTRA_MANUAL_TRIGGER, manualTrigger)
         }
         activity.runOnUiThread { activity.startActivity(intent) }
 
@@ -277,6 +285,7 @@ class ShiguangRepository(private val context: Context) {
                 school.name,
                 school.resourceFolder,
                 id,
+                raw["adapter_id"].orEmpty().ifBlank { id },
                 raw["adapter_name"].orEmpty().ifBlank { id },
                 raw["category"].orEmpty(),
                 raw["asset_js_path"].orEmpty(),
