@@ -116,7 +116,9 @@ for (const marker of alignmentMarkers) {
   }
 }
 
-if (/\.page-week \.week-board \.week-scroll\s*\{[^}]*padding-left:\s*(?!0\b)/s.test(readable)) {
+const weekScrollBlock = readable.match(/\.page-week \.week-board \.week-scroll\s*\{([^}]*)\}/s)?.[1] ?? '';
+const leftPaddingValues = [...weekScrollBlock.matchAll(/padding-left:\s*([^;]+);/g)].map((match) => match[1].trim());
+if (leftPaddingValues.some((value) => !/^0(?:\s*!important)?$/.test(value))) {
   console.error('Week axis alignment regression: scrolling body must not carry a left gutter separate from the header.');
   process.exit(1);
 }
