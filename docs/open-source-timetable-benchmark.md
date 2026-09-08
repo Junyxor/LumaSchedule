@@ -6,6 +6,7 @@ This document keeps product decisions grounded in mature open-source timetable p
 
 | Project | What it is useful for | Relevant ideas for LumaSchedule |
 | --- | --- | --- |
+| `lingion/sleepy` (Sleepy / 轻课表) | Modern university-focused Android timetable | three timetable views, horizontal week switching, multi-schedule management, per-schedule section-time editor, preview-before-import, course notes/colors/odd-even weeks, five widget layouts, explicit conflict handling, undo, free-form reminder lead time, multi-theme/system dark mode |
 | `HF-CYGG/Dawn-Course` | Modern Android timetable app | local-first, multi-semester management, day/week views, course color management, widgets, teaching-system scripts with online/cache/assets fallback, backup preview, WebDAV auto-sync, reminders, DND/auto-mute |
 | `zfman/TimetableView` / monster timetable ecosystem | Mature Android timetable component | weekend visibility, course color management, background/transparency, blank-cell interaction, long-press course actions, configurable dimensions, portable local configuration |
 | `ClassIsland/ClassIsland` | Deep schedule presentation and reminder logic | hide finished classes, fade completed classes, current-class focus, configurable spacing, tomorrow-schedule rules, precise countdown, temporary schedule/change highlighting |
@@ -26,22 +27,26 @@ This document keeps product decisions grounded in mature open-source timetable p
 - Native/Web confirmation sheets for destructive operations; no Tauri runtime dependency on Android.
 - Semester basics: name, start date, total weeks, timezone, visible section count.
 - Display controls: teacher, room, exact time, compact density.
+- Conflict handling must never silently hide a course. At minimum warn before write; the timetable renderer should ultimately expose all overlaps.
 
 ### P1 — mature timetable behavior
 
 - Multiple semesters / schedules with an explicit schedule switcher instead of relying on the newest database row.
 - Course color management: automatic stable color plus per-course override.
+- Course fields: note, explicit odd/even-week handling, and section-time presets.
 - Finished-class behavior: show normally / fade / hide.
 - Tomorrow preview: never / after today's classes / when today is empty / always.
 - Temporary changes: cancel class, reschedule, substitute location/teacher, swap classes; show a clear visual marker.
 - Conflict rendering: side-by-side or stacked conflict cards with conflict warning, not silent overlap.
+- Undo for recent timetable edits and imports; schedule switching itself should not create an undo entry.
 - Import history with source, timestamp, counts, and rollback-friendly backup link.
+- Swipe or explicit controls for browsing previous/next teaching weeks without changing the calculated current week.
 
 ### P2 — widgets, automation, and appearance
 
-- Android widgets: next class, today's list, two-day view, full week view.
+- Android widgets: next class, today's list, two-day view, week list/statistics, full week grid.
 - Widget transparency/density and system-theme adaptation.
-- Reminder profiles: per-course override, vibration/sound, quiet hours, custom lead time.
+- Reminder profiles: per-course override, vibration/sound, quiet hours, **free-form lead time**, daily agenda reminder.
 - Optional DND/auto-mute automation around class time with explicit permission and per-schedule control.
 - Appearance: light/dark/system, accent color, background image, blur/brightness, Material-style dynamic color where appropriate while keeping Luma's Liquid Glass identity.
 - WebDAV auto-backup policy: manual/daily/on-change, retention count, Wi-Fi-only option, last successful backup status.
@@ -51,10 +56,11 @@ This document keeps product decisions grounded in mature open-source timetable p
 - Do not reintroduce Rust/Tauri/NDK on Android for features that Android/Kotlin can provide directly.
 - Do not add cloud accounts as a requirement; local-first remains the default.
 - Do not add a feature only because another timetable has it. It must improve university timetable use, data portability, reliability, or daily glanceability.
+- Do not expose settings that are decorative or disconnected from runtime behavior. Every visible setting must have an observable effect and a regression path.
 
 ## Current implementation status
 
 - Native Android core, SQLite, reminders, next-course widget, SAF import/export, full backup/restore and WebDAV are connected.
 - Shiguang adapter snapshot and GDUT path are bundled and smoke-tested.
-- Smart weekend display, timetable display settings, adapter health summary, native confirmation UI, and import diff/merge/overwrite are being integrated on `feat/android-native-core`.
-- Next large product phase after Native E2E stabilization: multi-schedule switcher + course colors + temporary schedule changes + richer widgets.
+- Smart weekend display, timetable display settings, adapter health summary, native confirmation UI, and import diff/merge/overwrite are integrated on `feat/android-native-core` and are under CI validation.
+- Next large product phase after Native E2E stabilization: multi-schedule switcher + course colors + temporary schedule changes + richer widgets + conflict renderer/undo.
