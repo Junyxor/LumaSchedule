@@ -195,7 +195,7 @@
 <section class="page page-grades">
   <header class="topbar grades-topbar">
     <div><span class="eyebrow">成绩</span><h1>成绩与绩点</h1><p>原始成绩本地保存，统计按学校提供的数据计算。</p></div>
-    <button class="refresh-grade glass-panel" on:click={refresh} disabled={loading} aria-label="刷新成绩"><RefreshCw size={19} class:spin={loading}/></button>
+    <button class="refresh-grade glass-panel" on:click={refresh} disabled={loading} aria-label="刷新成绩"><RefreshCw size={19} class={loading ? 'spin' : ''}/></button>
   </header>
 
   <div class="grade-filters content-surface">
