@@ -297,7 +297,8 @@ class DataTransferEngine(private val dbFile: File) {
             "calendar_bindings",
             "sync_profiles",
             "settings",
-            "import_audit"
+            "import_audit",
+            "grade_records"
         )
         val DELETE_ORDER = INSERT_ORDER.asReversed()
 
