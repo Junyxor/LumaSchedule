@@ -19,6 +19,7 @@ import type {
   ShiguangImportStart,
   ShiguangSchool,
   ShiguangSessionSnapshot,
+  UpdateCheckResult,
   WebDavCredentials,
   WebDavProfile,
   WebDavResult
@@ -36,6 +37,10 @@ export function getBootstrap() {
     nativeCore?: boolean;
     startupMs?: number;
   }>('get_bootstrap');
+}
+
+export function checkForUpdates() {
+  return invokeNative<UpdateCheckResult>('check_update', {}, 30_000);
 }
 
 export async function listScheduleCourses(): Promise<Course[]> {
@@ -143,6 +148,13 @@ export function startShiguangImport(schoolId: string, adapterId: string) {
   return invokeNative<ShiguangImportStart>('shiguang_start_import', {
     schoolId,
     adapterId
+  });
+}
+
+export function startSmartCompatibilityImport(url: string, schoolName = '') {
+  return invokeNative<ShiguangImportStart>('shiguang_start_smart_import', {
+    url: url.trim(),
+    schoolName: schoolName.trim()
   });
 }
 
