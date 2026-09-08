@@ -51,7 +51,7 @@ class WeekScheduleBridge(context: Context) : Closeable {
         db.rawQuery(
             "SELECT m.id, c.name, COALESCE(c.teacher,''), COALESCE(m.location,''), " +
                 "COALESCE(m.start_time,''), COALESCE(m.end_time,''), m.weekday, c.color_token, " +
-                "m.start_section, m.end_section, m.weeks_mask " +
+                "m.start_section, m.end_section, m.weeks_mask, c.credit " +
                 "FROM courses c JOIN course_meetings m ON m.course_id=c.id " +
                 "WHERE c.schedule_id=? ORDER BY m.weekday, m.start_section, c.name",
             arrayOf(schedule.id)
@@ -76,6 +76,7 @@ class WeekScheduleBridge(context: Context) : Closeable {
                         .put("startSection", startSection)
                         .put("endSection", endSection)
                         .put("weeks", JSONArray(weeksFromMask(cursor.getLong(10), schedule.weekCount)))
+                        .put("credit", if (cursor.isNull(11)) JSONObject.NULL else cursor.getDouble(11))
                 )
             }
         }
