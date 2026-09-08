@@ -47,11 +47,12 @@ class WeekScheduleBridge(context: Context) : Closeable {
         }
 
         val slots = parseSlots(schedule.sectionsJson)
+        val creditIndex = readCourseCreditIndex()
         val courses = JSONArray()
         db.rawQuery(
             "SELECT m.id, c.name, COALESCE(c.teacher,''), COALESCE(m.location,''), " +
                 "COALESCE(m.start_time,''), COALESCE(m.end_time,''), m.weekday, c.color_token, " +
-                "m.start_section, m.end_section, m.weeks_mask, c.credit " +
+                "m.start_section, m.end_section, m.weeks_mask " +
                 "FROM courses c JOIN course_meetings m ON m.course_id=c.id " +
                 "WHERE c.schedule_id=? ORDER BY m.weekday, m.start_section, c.name",
             arrayOf(schedule.id)
@@ -63,6 +64,7 @@ class WeekScheduleBridge(context: Context) : Closeable {
                 val start = cursor.getString(4).ifBlank { resolveSlot(slots, startSection, true).orEmpty() }
                 val end = cursor.getString(5).ifBlank { resolveSlot(slots, endSection, false).orEmpty() }
                 val colorToken = cursor.getString(7)
+                val credit = creditIndex.optDouble(normalizedCourseName(name), Double.NaN)
                 courses.put(
                     JSONObject()
                         .put("id", cursor.getString(0))
@@ -76,7 +78,7 @@ class WeekScheduleBridge(context: Context) : Closeable {
                         .put("startSection", startSection)
                         .put("endSection", endSection)
                         .put("weeks", JSONArray(weeksFromMask(cursor.getLong(10), schedule.weekCount)))
-                        .put("credit", if (cursor.isNull(11)) JSONObject.NULL else cursor.getDouble(11))
+                        .put("credit", if (credit.isFinite()) credit else JSONObject.NULL)
                 )
             }
         }
@@ -89,6 +91,19 @@ class WeekScheduleBridge(context: Context) : Closeable {
             .put("weekCount", schedule.weekCount)
             .toString()
     }
+
+    private fun readCourseCreditIndex(): JSONObject = db.rawQuery(
+        "SELECT value_json FROM settings WHERE key=? LIMIT 1",
+        arrayOf(COURSE_CREDIT_INDEX_KEY)
+    ).use { cursor ->
+        if (!cursor.moveToFirst()) return@use JSONObject()
+        runCatching { JSONObject(cursor.getString(0)) }.getOrDefault(JSONObject())
+    }
+
+    private fun normalizedCourseName(raw: String): String = raw
+        .trim()
+        .filterNot { it.isWhitespace() }
+        .lowercase()
 
     private fun weeksFromMask(mask: Long, weekCount: Int): List<Int> {
         if (mask == 0L) return (1..weekCount).toList()
@@ -132,4 +147,8 @@ class WeekScheduleBridge(context: Context) : Closeable {
         val weekCount: Int,
         val sectionsJson: String
     )
+
+    companion object {
+        private const val COURSE_CREDIT_INDEX_KEY = "course.credit.index"
+    }
 }
