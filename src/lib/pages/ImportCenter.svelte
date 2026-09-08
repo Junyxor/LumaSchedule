@@ -1,7 +1,8 @@
 <script lang="ts">
   import { ArrowLeft, BookOpenCheck, Building2, CalendarSync, CheckCircle2, ChevronRight, FileJson2, FileSpreadsheet, LoaderCircle, Search, ShieldCheck, TriangleAlert, UploadCloud, X } from 'lucide-svelte';
-  import { closeShiguangSession, commitImport, getShiguangSession, importText, listShiguangAdapters, listShiguangSchools, startShiguangImport } from '../tauri';
-  import type { ImportBundle, ShiguangAdapter, ShiguangImportStart, ShiguangSchool } from '../types';
+  import ConfirmSheet from '../components/ConfirmSheet.svelte';
+  import { closeShiguangSession, commitImport, getShiguangSession, importText, listShiguangAdapters, listShiguangSchools, previewImport, startShiguangImport } from '../tauri';
+  import type { ImportBundle, ImportDiff, ImportMode, ShiguangAdapter, ShiguangImportStart, ShiguangSchool } from '../types';
   import { createEventDispatcher, onDestroy, tick } from 'svelte';
 
   const dispatch = createEventDispatcher<{ imported: void }>();
@@ -18,6 +19,10 @@
   let loading = false;
   let dragOver = false;
   let preview: ImportBundle | null = null;
+  let importDiff: ImportDiff | null = null;
+  let diffLoading = false;
+  let importMode: ImportMode = 'new';
+  let overwriteConfirmOpen = false;
   let selectedFile = '';
   let error = '';
   let committed = '';
@@ -46,6 +51,7 @@
     .filter((school) => !normalizedSchoolQuery || school.name.toLowerCase().includes(normalizedSchoolQuery) || school.id.toLowerCase().includes(normalizedSchoolQuery) || school.initial.toLowerCase().includes(normalizedSchoolQuery))
     .sort((a,b) => Number(b.id === 'GDUT') - Number(a.id === 'GDUT') || a.initial.localeCompare(b.initial, 'zh-CN'))
     .slice(0,100);
+  $: showGenericSuggestions = genericSchools.length > 0 && normalizedSchoolQuery.length > 0 && filteredSchools.length === 0;
 
   function formatFor(name: string) {
     const ext = name.toLowerCase().split('.').pop() ?? '';
@@ -69,33 +75,71 @@
     fileInput.click();
   }
 
+  async function preparePreview(bundle: ImportBundle, sourceLabel: string) {
+    preview = bundle;
+    selectedFile = sourceLabel;
+    importDiff = null;
+    error = '';
+    committed = '';
+    diffLoading = true;
+    try {
+      importDiff = await previewImport(bundle);
+      importMode = importDiff.hasExistingSchedule ? 'merge' : 'new';
+    } catch (e) {
+      error = `导入内容已解析，但差异分析失败：${friendlyError(e)}`;
+      importMode = 'new';
+    } finally {
+      diffLoading = false;
+    }
+  }
+
   async function loadFile(file?: File) {
     if (!file) return;
-    error=''; committed=''; preview=null; selectedFile=file.name;
+    error=''; committed=''; preview=null; importDiff=null; selectedFile=file.name;
     const format=formatFor(file.name);
     if (!['json','ics','csv','tsv','cses'].includes(format)) {
       error = `暂不识别 .${format || 'unknown'} 文件。`;
       return;
     }
     loading=true;
-    try { preview = await importText(format, await file.text()); }
-    catch(e) { error=friendlyError(e); }
+    try {
+      const bundle = await importText(format, await file.text());
+      await preparePreview(bundle, file.name);
+    } catch(e) { error=friendlyError(e); }
     finally { loading=false; }
   }
 
-  async function commitPreview() {
-    if(!preview)return;
+  async function commitWithMode(mode: ImportMode) {
+    if (!preview) return;
     loading=true; error='';
     try {
-      const result=await commitImport(preview);
-      committed=`已创建新课表：${result.courseCount} 门课程 / ${result.meetingCount} 个上课时段。`;
+      const result=await commitImport(preview, mode);
+      committed = mode === 'merge'
+        ? `已合并到当前课表：新增 ${result.addedCount} 个时段，跳过 ${result.skippedCount} 个重复项。`
+        : mode === 'overwrite'
+          ? `已覆盖当前课表：写入 ${result.meetingCount} 个时段，替换 ${result.removedCount} 个旧时段。`
+          : `已创建新课表：${result.courseCount} 门课程 / ${result.meetingCount} 个上课时段。`;
       preview=null;
+      importDiff=null;
+      overwriteConfirmOpen=false;
       dispatch('imported');
     } catch(e){ error=friendlyError(e); }
     finally { loading=false; }
   }
 
-  function onDrop(event: DragEvent){ event.preventDefault(); dragOver=false; loadFile(event.dataTransfer?.files?.[0]); }
+  function commitPreview() {
+    if (!preview || loading || diffLoading) return;
+    if (importMode === 'overwrite' && importDiff?.hasExistingSchedule) overwriteConfirmOpen = true;
+    else void commitWithMode(importMode);
+  }
+
+  function closePreview() {
+    preview = null;
+    importDiff = null;
+    error = '';
+  }
+
+  function onDrop(event: DragEvent){ event.preventDefault(); dragOver=false; void loadFile(event.dataTransfer?.files?.[0]); }
 
   async function openShiguang(){
     shiguangOpen=true;
@@ -162,7 +206,7 @@
     finally{ shiguangLoading=false; }
   }
 
-  function backToSchools(){ selectedSchool=null; adapters=[]; shiguangError=''; tick().then(() => schoolSearchInput?.focus({ preventScroll: true })); }
+  function backToSchools(){ selectedSchool=null; adapters=[]; shiguangError=''; void tick().then(() => schoolSearchInput?.focus({ preventScroll: true })); }
 
   async function beginShiguang(adapter: ShiguangAdapter){
     if(!selectedSchool||shiguangLoading)return;
@@ -170,7 +214,7 @@
     try{
       activeSession=await startShiguangImport(selectedSchool.id,adapter.adapterId);
       sessionMessage='登录窗口已打开。完成登录后会自动读取课程。';
-      pollShiguang(activeSession.sessionId);
+      void pollShiguang(activeSession.sessionId);
     } catch(e){ shiguangError=friendlyError(e); sessionMessage=''; }
     finally{ shiguangLoading=false; }
   }
@@ -181,10 +225,11 @@
       const state=await getShiguangSession(sessionId);
       sessionMessage=state.message||(state.status==='collecting'?'正在整理课程与作息…':'等待教务登录完成…');
       if(state.status==='complete'&&state.bundle){
-        preview=state.bundle;
-        selectedFile=`${state.schoolName} · ${state.adapterName}`;
+        const bundle = state.bundle;
+        const label = `${state.schoolName} · ${state.adapterName}`;
         activeSession=null; shiguangOpen=false; selectedSchool=null; adapters=[];
         await closeShiguangSession(sessionId).catch(()=>undefined);
+        await preparePreview(bundle, label);
         return;
       }
       if(state.status==='error'){
@@ -193,10 +238,10 @@
         await closeShiguangSession(sessionId).catch(()=>undefined);
         return;
       }
-      pollTimer=setTimeout(()=>pollShiguang(sessionId),900);
+      pollTimer=setTimeout(()=>void pollShiguang(sessionId),900);
     }catch{
       sessionMessage='正在重新连接导入会话…';
-      pollTimer=setTimeout(()=>pollShiguang(sessionId),1500);
+      pollTimer=setTimeout(()=>void pollShiguang(sessionId),1500);
     }
   }
 
@@ -210,24 +255,52 @@
 
   <div class="import-toolbar glass-panel apple-search">
     <Search size={18}/>
-    <input bind:value={schoolQuery} aria-label="搜索学校" placeholder="搜索学校，例如 广东工业大学" on:focus={openShiguang} on:input={()=>{ if(!shiguangOpen) openShiguang(); }}/>
+    <input bind:value={schoolQuery} aria-label="搜索学校" placeholder="搜索学校，例如 广东工业大学" on:focus={openShiguang} on:input={()=>{ if(!shiguangOpen) void openShiguang(); }}/>
   </div>
 
   <div class="source-grid apple-source-list">{#each sources as source}<button class="source-card content-surface" on:click={()=>openFilePicker(source.accept)}><span class="source-icon {source.accent}"><svelte:component this={source.icon} size={21}/></span><div><span class="source-title"><b>{source.title}</b><em>{source.tag}</em></span><p>{source.subtitle}</p></div><ChevronRight size={18}/></button>{/each}</div>
 
   <div class="import-hero content-surface" role="region" aria-label="课表文件导入" class:drag-over={dragOver} on:dragover={(e)=>{e.preventDefault();dragOver=true;}} on:dragleave={()=>dragOver=false} on:drop={onDrop}>
-    <input bind:this={fileInput} class="file-input" type="file" accept={ALL_IMPORT_ACCEPT} on:change={(e)=>loadFile(e.currentTarget.files?.[0])}/>
+    <input bind:this={fileInput} class="file-input" type="file" accept={ALL_IMPORT_ACCEPT} on:change={(e)=>void loadFile(e.currentTarget.files?.[0])}/>
     <div class="upload-mark">{#if loading}<LoaderCircle class="spin" size={26}/>{:else}<UploadCloud size={26}/>{/if}</div>
-    <div><h2>{loading?'正在解析…':'从文件导入'}</h2><p>支持 JSON / ICS / CSV / TSV / CSES。导入前会先预览。</p></div>
+    <div><h2>{loading?'正在解析…':'从文件导入'}</h2><p>支持 JSON / ICS / CSV / TSV / CSES。导入前会先做差异预览。</p></div>
     <button class="primary-button" on:click={()=>openFilePicker()} disabled={loading}>选择文件</button>
   </div>
 
   {#if committed}<div class="import-result import-success content-surface"><CheckCircle2 size={18}/><div><b>导入完成</b><span>{committed}</span></div></div>{/if}
-  {#if error}<div class="import-result import-error content-surface"><X size={18}/><div><b>暂时无法解析 {selectedFile}</b><span>{error}</span></div></div>{/if}
+  {#if error}<div class="import-result import-error content-surface"><X size={18}/><div><b>导入提示</b><span>{error}</span></div></div>{/if}
 
-  {#if preview}<article class="import-preview content-surface"><div class="preview-head"><div class="preview-ok"><CheckCircle2 size={20}/></div><div><span class="eyebrow">导入预览</span><h2>已识别 {preview.courses.length} 条课程记录</h2><p>{selectedFile} · 来源 {preview.source}</p></div><button class="icon-ghost" on:click={()=>preview=null} aria-label="关闭导入预览"><X size={18}/></button></div><div class="preview-courses">{#each preview.courses.slice(0,6) as course}<div class="preview-course"><span>周{course.weekday}</span><div><b>{course.name}</b><small>第 {course.startSection}–{course.endSection} 节 · {course.location||'教室未提供'}</small></div><em>{course.weeks.length} 周</em></div>{/each}{#if preview.courses.length>6}<div class="preview-more">还有 {preview.courses.length-6} 条记录</div>{/if}</div><div class="preview-actions"><button class="secondary-button" on:click={()=>preview=null}>取消</button><button class="primary-button" on:click={commitPreview} disabled={loading}>确认导入</button></div></article>{/if}
+  {#if preview}
+    <article class="import-preview content-surface">
+      <div class="preview-head"><div class="preview-ok"><CheckCircle2 size={20}/></div><div><span class="eyebrow">导入预览</span><h2>已识别 {preview.courses.length} 条课程记录</h2><p>{selectedFile} · 来源 {preview.source}</p></div><button class="icon-ghost" on:click={closePreview} aria-label="关闭导入预览"><X size={18}/></button></div>
 
-  <div class="security-note"><ShieldCheck size={18}/><div><b>本地优先</b><span>学校登录在隔离 WebView 中完成，课程先进入预览再写入本地数据库。</span></div></div>
+      {#if diffLoading}
+        <div class="diff-loading"><LoaderCircle class="spin" size={18}/> 正在与当前课表比较…</div>
+      {:else if importDiff}
+        <div class="diff-grid" aria-label="导入差异">
+          <div><b>{importDiff.newCount}</b><span>新增时段</span></div>
+          <div><b>{importDiff.duplicateCount}</b><span>重复跳过</span></div>
+          <div class:warn={importDiff.conflictCount>0}><b>{importDiff.conflictCount}</b><span>时间冲突</span></div>
+          <div><b>{importDiff.removeCount}</b><span>覆盖会移除</span></div>
+        </div>
+        <div class="import-mode-picker">
+          <div><b>导入方式</b><span>{importDiff.hasExistingSchedule ? `当前已有 ${importDiff.existingMeetingCount} 个课程时段` : '当前没有课表'}</span></div>
+          <div class="mode-options">
+            <button class:active={importMode==='new'} on:click={()=>importMode='new'}><b>新建</b><small>保留当前课表，创建新课表</small></button>
+            <button class:active={importMode==='merge'} disabled={!importDiff.hasExistingSchedule} on:click={()=>importMode='merge'}><b>合并</b><small>新增课程，重复项自动跳过</small></button>
+            <button class:active={importMode==='overwrite'} disabled={!importDiff.hasExistingSchedule} on:click={()=>importMode='overwrite'}><b>覆盖</b><small>用本次导入替换当前课表</small></button>
+          </div>
+          {#if importMode==='merge' && importDiff.conflictCount>0}<div class="conflict-note"><TriangleAlert size={14}/> 检测到 {importDiff.conflictCount} 个时间冲突；合并后会保留两边课程并在周课表中同时显示。</div>{/if}
+          {#if importMode==='overwrite' && importDiff.removeCount>0}<div class="overwrite-note">覆盖将移除当前课表中 {importDiff.removeCount} 个本次导入不存在的时段。</div>{/if}
+        </div>
+      {/if}
+
+      <div class="preview-courses">{#each preview.courses.slice(0,6) as course}<div class="preview-course"><span>周{course.weekday}</span><div><b>{course.name}</b><small>第 {course.startSection}–{course.endSection} 节 · {course.location||'教室未提供'}</small></div><em>{course.weeks.length} 周</em></div>{/each}{#if preview.courses.length>6}<div class="preview-more">还有 {preview.courses.length-6} 条记录</div>{/if}</div>
+      <div class="preview-actions"><button class="secondary-button" on:click={closePreview}>取消</button><button class="primary-button" on:click={commitPreview} disabled={loading||diffLoading}>{loading?'正在导入…':importMode==='merge'?'确认合并':importMode==='overwrite'?'确认覆盖':'创建课表'}</button></div>
+    </article>
+  {/if}
+
+  <div class="security-note"><ShieldCheck size={18}/><div><b>本地优先</b><span>学校登录在隔离 WebView 中完成，课程先进入预览与差异分析，再写入本地数据库。</span></div></div>
 </section>
 
 {#if shiguangOpen}
@@ -239,29 +312,67 @@
         <div class="adapter-session"><div class="session-orbit"><LoaderCircle class="spin" size={22}/></div><div><b>{activeSession.schoolName} · {activeSession.adapterName}</b><span>{sessionMessage}</span><small>允许访问：{activeSession.allowedHosts.join(' · ')}</small>{#if activeSession.insecureTransport}<small class="adapter-http-warning"><TriangleAlert size={13}/> 该校旧教务仍使用 HTTP，请仅在可信网络登录。</small>{/if}</div></div>
       {:else if selectedSchool}
         <div class="adapter-subbar"><button on:click={backToSchools}><ArrowLeft size={15}/> 返回</button><span>{adapters.length} 个适配器</span></div>
-        <div class="adapter-list">{#if shiguangLoading}<div class="adapter-loading"><LoaderCircle class="spin" size={20}/> 正在读取适配器…</div>{:else}{#each adapters as adapter}<button class="adapter-row" on:click={()=>beginShiguang(adapter)} disabled={!adapter.importUrl}><span class="adapter-row-icon"><CalendarSync size={18}/></span><div><b>{adapter.adapterName}</b><p>{adapter.description}</p><small>{adapter.category} · {adapter.maintainer}</small></div><ChevronRight size={17}/></button>{/each}{#if !adapters.length}<div class="adapter-empty">这个学校暂时没有可用的网页登录适配器。</div>{/if}{/if}</div>
+        <div class="adapter-list">{#if shiguangLoading}<div class="adapter-loading"><LoaderCircle class="spin" size={20}/> 正在读取适配器…</div>{:else}{#each adapters as adapter}<button class="adapter-row" on:click={()=>void beginShiguang(adapter)} disabled={!adapter.importUrl}><span class="adapter-row-icon"><CalendarSync size={18}/></span><div><b>{adapter.adapterName}</b><p>{adapter.description}</p><small>{adapter.category} · {adapter.maintainer}</small></div><ChevronRight size={17}/></button>{/each}{#if !adapters.length}<div class="adapter-empty">这个学校暂时没有可用的网页登录适配器。</div>{/if}{/if}</div>
       {:else}
         <div class="school-search"><Search size={17}/><input bind:this={schoolSearchInput} bind:value={schoolQuery} aria-label="学校名称" placeholder="输入学校名称，例如 广东工业大学"/></div>
-        {#if shiguangLoading}<div class="adapter-loading"><LoaderCircle class="spin" size={20}/> 正在读取学校索引…</div>{:else}
-          {#if genericSchools.length}
-            <div class="generic-adapters"><span>学校没单独适配？尝试通用教务</span><div>{#each genericSchools as school}<button on:click={()=>chooseSchool(school)}>{school.name.replace('-通用教务','')}</button>{/each}</div></div>
+        {#if shiguangLoading}
+          <div class="adapter-loading"><LoaderCircle class="spin" size={20}/> 正在读取学校索引…</div>
+        {:else if shiguangError && schools.length===0}
+          <div class="adapter-empty adapter-index-error"><TriangleAlert size={16}/> 学校索引读取失败，请稍后重试；文件导入仍可正常使用。</div>
+        {:else}
+          {#if showGenericSuggestions}
+            <div class="generic-adapters"><span>没有单独学校适配，可以尝试通用教务</span><div>{#each genericSchools as school}<button on:click={()=>void chooseSchool(school)}>{school.name.replace('-通用教务','')}</button>{/each}</div></div>
           {/if}
-          <div class="school-list">{#each filteredSchools as school}<button class:featured-school={school.id==='GDUT'} on:click={()=>chooseSchool(school)}><span>{school.initial.slice(0,1)||'校'}</span><div><b>{school.name}</b><small>{school.id}</small></div>{#if school.id==='GDUT'}<em>已验证</em>{/if}<ChevronRight size={16}/></button>{/each}{#if !filteredSchools.length}<div class="adapter-empty">没有找到匹配学校。可以尝试上方通用教务，或使用 JSON / ICS / CSV 导入。</div>{/if}</div>
+          <div class="school-list">{#each filteredSchools as school}<button class:featured-school={school.id==='GDUT'} on:click={()=>void chooseSchool(school)}><span>{school.initial.slice(0,1)||'校'}</span><div><b>{school.name}</b><small>{school.id}</small></div>{#if school.id==='GDUT'}<em>已验证</em>{/if}<ChevronRight size={16}/></button>{/each}{#if normalizedSchoolQuery && !filteredSchools.length && !showGenericSuggestions}<div class="adapter-empty">没有找到匹配学校。可以使用文件导入，或换关键词重试。</div>{/if}</div>
         {/if}
       {/if}
-      {#if shiguangError}<div class="adapter-error"><X size={15}/> {shiguangError}</div>{/if}
+      {#if shiguangError && schools.length>0}<div class="adapter-error"><X size={15}/> {shiguangError}</div>{/if}
       <div class="adapter-sandbox-note"><ShieldCheck size={16}/><span>适配数据来自开源 shiguang_warehouse；在线优先，离线回退随 App 打包的最近快照。</span></div>
     </div>
   </div>
 {/if}
 
+<ConfirmSheet
+  open={overwriteConfirmOpen}
+  title="覆盖当前课表"
+  message={`将用本次导入替换当前课表${importDiff?.removeCount ? `，预计移除 ${importDiff.removeCount} 个旧时段` : ''}。建议重要课表先导出备份。`}
+  confirmText="确认覆盖"
+  danger
+  busy={loading}
+  on:cancel={()=>overwriteConfirmOpen=false}
+  on:confirm={()=>void commitWithMode('overwrite')}
+/>
+
 <style>
+  .diff-loading { margin:12px 0; min-height:44px; border-radius:14px; display:flex; align-items:center; justify-content:center; gap:8px; color:rgba(60,60,67,.62); background:rgba(118,118,128,.06); font-size:11px; }
+  .diff-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:14px 0; }
+  .diff-grid > div { min-height:66px; border-radius:15px; padding:11px; background:rgba(118,118,128,.06); display:flex; flex-direction:column; justify-content:center; }
+  .diff-grid b { font-size:20px; letter-spacing:-.04em; }
+  .diff-grid span { margin-top:3px; color:rgba(60,60,67,.55); font-size:9px; }
+  .diff-grid .warn { background:rgba(221,153,58,.10); color:#9d6518; }
+  .import-mode-picker { margin:0 0 14px; padding:14px; border:1px solid rgba(60,60,67,.07); border-radius:18px; background:rgba(118,118,128,.035); display:grid; gap:10px; }
+  .import-mode-picker > div:first-child { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+  .import-mode-picker > div:first-child b { font-size:11px; }
+  .import-mode-picker > div:first-child span { color:rgba(60,60,67,.52); font-size:9px; }
+  .mode-options { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
+  .mode-options button { min-height:62px; border:1px solid rgba(118,118,128,.12); border-radius:14px; background:rgba(255,255,255,.38); color:inherit; text-align:left; padding:10px; }
+  .mode-options button b,.mode-options button small { display:block; }
+  .mode-options button b { font-size:11px; }
+  .mode-options button small { margin-top:3px; font-size:8px; line-height:1.4; color:rgba(60,60,67,.53); }
+  .mode-options button.active { border-color:rgba(91,86,214,.30); background:rgba(91,86,214,.09); }
+  .mode-options button.active b { color:#5751c9; }
+  .mode-options button:disabled { opacity:.42; }
+  .conflict-note,.overwrite-note { border-radius:12px; padding:9px 10px; font-size:9px; line-height:1.5; }
+  .conflict-note { display:flex; align-items:flex-start; gap:6px; color:#93631d; background:rgba(221,153,58,.09); }
+  .overwrite-note { color:#a24857; background:rgba(220,70,84,.07); }
   .generic-adapters { display: grid; gap: 7px; padding: 0 2px; }
   .generic-adapters > span { font-size: 11px; opacity: .62; }
   .generic-adapters > div { display: flex; flex-wrap: wrap; gap: 6px; }
   .generic-adapters button { min-height: 31px; padding: 0 10px; border: 1px solid rgba(91,86,214,.16); border-radius: 999px; background: rgba(91,86,214,.08); color: inherit; font-size: 11px; }
+  .adapter-index-error { display:flex; align-items:center; justify-content:center; gap:7px; }
   .adapter-browser { transition: transform .22s cubic-bezier(.2,.75,.25,1); will-change: transform; }
   .adapter-browser.sheet-dragging { transition: none; }
   .sheet-grabber { touch-action: none; cursor: grab; padding: 9px 10px; margin: -9px auto -7px; background-clip: content-box; box-sizing: content-box; }
   .sheet-grabber:active { cursor: grabbing; }
+  @media (max-width:760px) { .diff-grid { grid-template-columns:repeat(2,1fr); } .mode-options { grid-template-columns:1fr; } .mode-options button { min-height:52px; } }
 </style>
