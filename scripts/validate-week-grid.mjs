@@ -1,34 +1,39 @@
 import fs from 'node:fs';
 
-const core = fs.readFileSync('src/lib/pages/WeekCore.svelte', 'utf8');
+const core = fs.readFileSync('src/lib/pages/WeekTimelineCore.svelte', 'utf8');
 const week = fs.readFileSync('src/lib/pages/Week.svelte', 'utf8');
 const runtime = fs.readFileSync('src/styles/mobile-runtime.css', 'utf8');
 const readable = fs.readFileSync('src/styles/week-readable-layout.css', 'utf8');
 const appCss = fs.readFileSync('src/app.css', 'utf8');
 
 const requiredCore = [
-  'class="week-body-grid"',
-  'grid-column:${columnFor(course.day) + 1}',
-  'class="section-time"',
-  "preferences.showTime ? '时间' : '节次'",
+  'const TIME_STEP_MINUTES = 5',
+  'export let timelineCourses: Course[] = []',
+  'class="week-time-grid"',
+  'class="time-guide"',
+  'class="time-label"',
+  'courseGridPlacement(course)',
+  'parseClock(course.start)',
+  'parseClock(course.end)',
+  'grid-template-rows: repeat(var(--time-row-count), var(--time-step-height))',
   'class="course-credit"',
   'export let addRequest = 0'
 ];
 
 for (const marker of requiredCore) {
   if (!core.includes(marker)) {
-    console.error(`Week grid regression: missing ${marker}`);
+    console.error(`Week timeline regression: missing ${marker}`);
     process.exit(1);
   }
 }
 
-if (/\.week-board\s+\.week-course\s*\{[^}]*left\s*:\s*calc\(/s.test(core)) {
-  console.error('Week grid regression: course cards must not use absolute left:calc positioning.');
+if (core.includes('left:calc(') || core.includes('left: calc(')) {
+  console.error('Week timeline regression: course columns must not use calculated absolute left positioning.');
   process.exit(1);
 }
 
-if (!/\.week-body-grid\s+\.week-course\s*\{[^}]*position\s*:\s*relative/s.test(core)) {
-  console.error('Week grid regression: course cards must be grid items, not absolutely positioned.');
+if (!week.includes("import WeekTimelineCore from './WeekTimelineCore.svelte';") || !week.includes('timelineCourses={allCourses}')) {
+  console.error('Week timeline regression: full-term courses must feed the time-scale inference.');
   process.exit(1);
 }
 
@@ -52,10 +57,14 @@ const readableMarkers = [
   'overflow: visible !important',
   '.page-week .week-board .week-header',
   'position: sticky !important',
-  '.page-week .week-body-grid .week-course span',
+  '.page-week .week-time-grid',
+  'repeat(var(--time-row-count), var(--time-step-height))',
+  '.page-week .time-guide.major',
+  '.page-week .time-label',
+  '.page-week .week-time-grid .week-course span',
   'text-overflow: clip !important',
   'white-space: normal !important',
-  '--axis-width: 44px !important'
+  '--axis-width: 46px !important'
 ];
 
 for (const marker of readableMarkers) {
@@ -70,4 +79,4 @@ if (!appCss.includes("@import './styles/week-readable-layout.css';")) {
   process.exit(1);
 }
 
-console.log('Week grid and readability contract OK');
+console.log('Week time-proportional layout contract OK');

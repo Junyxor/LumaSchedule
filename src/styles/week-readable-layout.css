@@ -1,6 +1,4 @@
 @media (max-width: 760px) {
-  /* Week view should behave like a timetable first, not a stack of nested cards.
-     Keep one natural vertical scroll surface and let the date row stay visible. */
   .page-week.week-shell {
     height: auto !important;
     min-height: 100dvh !important;
@@ -34,11 +32,10 @@
   }
 
   .page-week .week-board {
-    --axis-width: 44px !important;
-    --row-height: 66px !important;
+    --axis-width: 46px !important;
     flex: none !important;
     overflow: visible !important;
-    border-radius: 12px !important;
+    border-radius: 10px !important;
     background: rgba(255, 255, 255, .18) !important;
   }
 
@@ -93,48 +90,28 @@
     overscroll-behavior: auto !important;
   }
 
-  .page-week .week-body-grid {
-    grid-template-rows: repeat(var(--section-count), var(--row-height)) !important;
-    min-height: calc(var(--section-count) * var(--row-height)) !important;
+  .page-week .week-time-grid {
+    grid-template-rows: repeat(var(--time-row-count), var(--time-step-height)) !important;
+    min-height: calc(var(--time-row-count) * var(--time-step-height)) !important;
   }
 
-  /* Keep the time axis secondary, but not so faint that it becomes hard to scan. */
-  .page-week .section-time {
-    padding: 2px 1px !important;
-    gap: 1px !important;
-    border-right: 0 !important;
-    border-bottom: 1px solid rgba(77, 82, 102, .05) !important;
-    background: transparent !important;
-    color: rgba(48, 48, 55, .68) !important;
+  .page-week .time-guide {
+    border-top-color: rgba(77, 82, 102, .028) !important;
   }
 
-  .page-week .section-time small {
-    font-size: 7.6px !important;
-    line-height: 1.05 !important;
-    color: rgba(48, 48, 55, .58) !important;
-    opacity: 1 !important;
+  .page-week .time-guide.major {
+    border-top-color: rgba(77, 82, 102, .085) !important;
   }
 
-  .page-week .section-time b {
-    font-size: 9.4px !important;
-    line-height: 1.04 !important;
-    font-weight: 700 !important;
-    color: rgba(34, 34, 40, .76) !important;
+  .page-week .time-label {
+    padding-right: 5px !important;
+    font-size: 9px !important;
+    line-height: 1 !important;
+    font-weight: 680 !important;
+    color: rgba(42, 42, 48, .68) !important;
   }
 
-  .page-week .section-time span {
-    font-size: 8px !important;
-    line-height: 1.04 !important;
-    color: rgba(48, 48, 55, .62) !important;
-  }
-
-  .page-week .week-cell {
-    border-left: 0 !important;
-    border-bottom: 1px solid rgba(77, 82, 102, .045) !important;
-  }
-
-  /* Course blocks should read instantly: larger type, darker text and clearer colors. */
-  .page-week .week-body-grid .week-course {
+  .page-week .week-time-grid .week-course {
     display: flex !important;
     flex-direction: column !important;
     justify-content: flex-start !important;
@@ -149,34 +126,32 @@
     background: linear-gradient(145deg, #cbc6ff, #aaa2f8) !important;
   }
 
-  .page-week .week-body-grid .week-course.cyan {
+  .page-week .week-time-grid .week-course.cyan {
     background: linear-gradient(145deg, #adebf0, #7fd5df) !important;
   }
 
-  .page-week .week-body-grid .week-course.amber {
+  .page-week .week-time-grid .week-course.amber {
     background: linear-gradient(145deg, #ffe5a9, #f3c66f) !important;
   }
 
-  .page-week .week-body-grid .week-course.blue {
-    background: linear-gradient(145deg, #c4e1ff, #8fbeeF) !important;
+  .page-week .week-time-grid .week-course.blue {
+    background: linear-gradient(145deg, #c4e1ff, #8fbeef) !important;
   }
 
-  .page-week .week-body-grid .week-course.green {
+  .page-week .week-time-grid .week-course.green {
     background: linear-gradient(145deg, #c2eccf, #8bd0a5) !important;
   }
 
-  .page-week .week-body-grid .week-course.pink {
+  .page-week .week-time-grid .week-course.pink {
     background: linear-gradient(145deg, #f5c7e1, #e79bc3) !important;
   }
 
-  .page-week .week-body-grid .week-course.orange {
+  .page-week .week-time-grid .week-course.orange {
     background: linear-gradient(145deg, #f7c7aa, #e99a6d) !important;
   }
 
-  .page-week .week-body-grid .week-course b {
+  .page-week .week-time-grid .week-course b {
     display: block !important;
-    -webkit-line-clamp: unset !important;
-    -webkit-box-orient: initial !important;
     overflow: visible !important;
     white-space: normal !important;
     word-break: break-word !important;
@@ -187,9 +162,8 @@
     color: #24232b !important;
   }
 
-  .page-week .week-body-grid .week-course span {
+  .page-week .week-time-grid .week-course span {
     display: block !important;
-    margin-top: 1px !important;
     overflow: visible !important;
     text-overflow: clip !important;
     white-space: normal !important;
@@ -202,18 +176,13 @@
     opacity: 1 !important;
   }
 
-  .page-week .week-body-grid .week-course .course-credit {
+  .page-week .week-time-grid .week-course .course-credit {
     display: block !important;
-    margin-top: 1px !important;
     font-size: 8.7px !important;
     line-height: 1.1 !important;
     font-weight: 720 !important;
     color: rgba(36, 35, 43, .74) !important;
     opacity: 1 !important;
-  }
-
-  .page-week .week-board.compact {
-    --row-height: 60px !important;
   }
 
   .page-week .week-board.compact .week-course {

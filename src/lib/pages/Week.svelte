@@ -1,7 +1,7 @@
 <script lang="ts">
   import { ChevronLeft, ChevronRight, Plus } from 'lucide-svelte';
   import { createEventDispatcher, onMount } from 'svelte';
-  import WeekCore from './WeekCore.svelte';
+  import WeekTimelineCore from './WeekTimelineCore.svelte';
   import { getFullScheduleSnapshot } from '../weekSchedule';
   import type { Course, SchedulePreferences } from '../types';
 
@@ -185,8 +185,9 @@
   </div>
 
   <div class="week-board-swipe" on:pointerdown={beginSwipe} on:pointerup={endSwipe} on:pointercancel={cancelSwipe}>
-    <WeekCore
+    <WeekTimelineCore
       courses={weekCourses}
+      timelineCourses={allCourses}
       hasSchedule={fullHasSchedule}
       currentWeek={selectedWeek}
       termName={fullTermName}
