@@ -3,7 +3,7 @@
     height: auto !important;
     min-height: 100dvh !important;
     overflow: visible !important;
-    gap: 6px !important;
+    gap: 8px !important;
     padding-top: max(10px, env(safe-area-inset-top)) !important;
     padding-bottom: calc(96px + env(safe-area-inset-bottom)) !important;
   }
@@ -12,22 +12,90 @@
     position: sticky;
     top: max(6px, env(safe-area-inset-top));
     z-index: 40;
-    min-height: 44px !important;
-    padding: 3px 4px !important;
-    border-radius: 14px !important;
-    background: rgba(255, 255, 255, .58) !important;
-    border-color: rgba(255, 255, 255, .68) !important;
-    box-shadow: 0 8px 24px rgba(47, 50, 73, .06), inset 0 1px rgba(255, 255, 255, .78) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(155%);
-    backdrop-filter: blur(20px) saturate(155%);
+    grid-template-columns: 34px minmax(0, 1fr) 36px 34px 38px !important;
+    gap: 2px !important;
+    min-height: 48px !important;
+    padding: 4px 5px !important;
+    border-radius: 16px !important;
+    background: rgba(255, 255, 255, .62) !important;
+    border-color: rgba(255, 255, 255, .72) !important;
+    box-shadow: 0 8px 24px rgba(47, 50, 73, .055), inset 0 1px rgba(255, 255, 255, .80) !important;
+    -webkit-backdrop-filter: blur(22px) saturate(155%);
+    backdrop-filter: blur(22px) saturate(155%);
+  }
+
+  .page-week .week-toolbar .week-arrow,
+  .page-week .week-toolbar .week-add-button {
+    width: 34px !important;
+    height: 36px !important;
+    border-radius: 12px !important;
+  }
+
+  .page-week .week-toolbar .week-arrow {
+    color: rgba(75, 70, 188, .88) !important;
+  }
+
+  .page-week .week-toolbar .week-add-button {
+    width: 38px !important;
+    background: rgba(91, 86, 214, .095) !important;
+    color: #514bc2 !important;
+  }
+
+  .page-week .week-toolbar .week-selector {
+    height: 38px !important;
+    gap: 2px !important;
+    padding: 0 7px !important;
+    border-radius: 11px !important;
+    background: transparent !important;
+  }
+
+  .page-week .week-toolbar .week-title {
+    gap: 5px !important;
+  }
+
+  .page-week .week-toolbar .week-title b {
+    font-size: 16px !important;
+    line-height: 1.02 !important;
+    font-weight: 780 !important;
+    letter-spacing: -.025em !important;
+    color: rgba(24, 24, 29, .91) !important;
+  }
+
+  .page-week .week-toolbar .week-title em {
+    padding: 2px 5px !important;
+    background: rgba(91, 86, 214, .10) !important;
+    color: #5751c9 !important;
+    font-size: 7.5px !important;
+    font-weight: 760 !important;
+  }
+
+  .page-week .week-toolbar .week-date {
+    font-size: 8.5px !important;
+    line-height: 1.15 !important;
+    color: rgba(60, 60, 67, .43) !important;
+  }
+
+  .page-week .week-toolbar .current-week {
+    width: 36px !important;
+    height: 28px !important;
+    border-radius: 999px !important;
+    background: rgba(91, 86, 214, .075) !important;
+    color: #5751c9 !important;
+    font-size: 8px !important;
+    font-weight: 730 !important;
+  }
+
+  .page-week .week-toolbar .current-week.active,
+  .page-week .week-toolbar .current-week:disabled {
+    opacity: .40 !important;
   }
 
   .page-week .week-board-swipe {
     flex: none !important;
     min-height: 0 !important;
     overflow: visible !important;
-    margin-inline: -10px !important;
-    padding-inline: 2px;
+    margin-inline: 0 !important;
+    padding-inline: 0 !important;
     touch-action: pan-y !important;
   }
 
@@ -41,26 +109,30 @@
     --axis-width: 46px !important;
     flex: none !important;
     overflow: visible !important;
-    border: 1px solid rgba(255, 255, 255, .48) !important;
-    border-radius: 15px !important;
-    background: rgba(255, 255, 255, .28) !important;
-    box-shadow: 0 9px 30px rgba(54, 58, 84, .035), inset 0 1px rgba(255, 255, 255, .46) !important;
+    border: 1px solid rgba(255, 255, 255, .52) !important;
+    border-radius: 16px !important;
+    background: rgba(255, 255, 255, .27) !important;
+    box-shadow: 0 8px 26px rgba(54, 58, 84, .032), inset 0 1px rgba(255, 255, 255, .48) !important;
   }
 
   .page-week .week-board .week-header {
     position: sticky !important;
-    top: calc(max(6px, env(safe-area-inset-top)) + 48px);
+    top: calc(max(6px, env(safe-area-inset-top)) + 54px);
     z-index: 35;
     height: 48px !important;
-    border-radius: 14px 14px 0 0;
-    background: rgba(249, 249, 253, .88) !important;
+    border-radius: 15px 15px 0 0;
+    background: rgba(249, 249, 253, .90) !important;
     -webkit-backdrop-filter: blur(20px) saturate(150%);
     backdrop-filter: blur(20px) saturate(150%);
     box-shadow: 0 1px rgba(60, 60, 67, .055) !important;
   }
 
   .page-week .week-board .week-header > div {
-    color: rgba(42, 42, 48, .70) !important;
+    color: rgba(42, 42, 48, .68) !important;
+  }
+
+  .page-week .week-board .week-header > div + div {
+    border-left: 1px solid rgba(77, 82, 102, .022);
   }
 
   .page-week .week-board .week-header > div span {
@@ -79,12 +151,12 @@
   .page-week .week-board .week-header .corner {
     font-size: 9px !important;
     font-weight: 680 !important;
-    color: rgba(42, 42, 48, .54) !important;
+    color: rgba(42, 42, 48, .52) !important;
   }
 
   .page-week .week-board .week-header .today {
     color: #514bc2 !important;
-    background: rgba(91, 86, 214, .085) !important;
+    background: rgba(91, 86, 214, .08) !important;
   }
 
   .page-week .week-board .week-header .today b {
@@ -105,17 +177,17 @@
     box-sizing: content-box;
     padding-top: 10px;
     padding-bottom: 16px;
-    border-radius: 0 0 14px 14px;
-    background: rgba(255, 255, 255, .10) !important;
+    border-radius: 0 0 15px 15px;
+    background: rgba(255, 255, 255, .09) !important;
   }
 
-  /* The half-hour mesh made the timetable look like a spreadsheet. Keep only real hour guides. */
+  /* Half-hour lines make the page look like a spreadsheet. Keep only hour anchors. */
   .page-week .time-guide {
     border-top-color: transparent !important;
   }
 
   .page-week .time-guide.major {
-    border-top-color: rgba(77, 82, 102, .075) !important;
+    border-top-color: rgba(77, 82, 102, .073) !important;
   }
 
   .page-week .time-label {
@@ -123,16 +195,16 @@
     font-size: 9.2px !important;
     line-height: 1 !important;
     font-weight: 680 !important;
-    color: rgba(42, 42, 48, .62) !important;
+    color: rgba(42, 42, 48, .60) !important;
   }
 
-  /* Empty schedules should be an empty state, not a twelve-hour blank calendar. */
+  /* Empty schedules are a compact state, not a twelve-hour blank calendar. */
   .page-week .week-time-grid:has(.week-empty) {
     grid-template-rows: none !important;
-    min-height: clamp(300px, 48dvh, 430px) !important;
+    min-height: clamp(300px, 46dvh, 410px) !important;
     padding-top: 0;
     padding-bottom: 0;
-    background: linear-gradient(180deg, rgba(255, 255, 255, .11), rgba(255, 255, 255, .04)) !important;
+    background: linear-gradient(180deg, rgba(255, 255, 255, .10), rgba(255, 255, 255, .035)) !important;
   }
 
   .page-week .week-time-grid:has(.week-empty) .time-guide,
@@ -141,7 +213,7 @@
   }
 
   .page-week .week-time-grid:has(.week-empty) .week-empty {
-    left: calc(var(--axis-width) + 12px) !important;
+    left: 12px !important;
     right: 12px !important;
     top: 50% !important;
     transform: translateY(-50%);
@@ -154,7 +226,7 @@
     box-shadow: 0 8px 28px rgba(56, 58, 80, .035), inset 0 1px rgba(255, 255, 255, .62);
     -webkit-backdrop-filter: blur(14px) saturate(135%);
     backdrop-filter: blur(14px) saturate(135%);
-    color: rgba(55, 55, 63, .52) !important;
+    color: rgba(55, 55, 63, .50) !important;
     font-size: 12px !important;
     line-height: 1.6 !important;
   }
@@ -226,6 +298,8 @@
 
   .page-week .week-time-grid .week-course .course-credit {
     display: block !important;
+    margin-top: auto;
+    padding-top: 2px;
     font-size: 8.7px !important;
     line-height: 1.1 !important;
     font-weight: 720 !important;
@@ -248,5 +322,36 @@
 
   .page-week .week-board.compact .week-course .course-credit {
     font-size: 8px !important;
+  }
+}
+
+@media (max-width: 390px) {
+  .page-week .week-toolbar {
+    grid-template-columns: 32px minmax(0, 1fr) 34px 32px 36px !important;
+    padding-inline: 4px !important;
+  }
+
+  .page-week .week-toolbar .week-selector {
+    padding-inline: 5px !important;
+  }
+
+  .page-week .week-toolbar .week-title b {
+    font-size: 15px !important;
+  }
+
+  .page-week .week-toolbar .week-date {
+    font-size: 8px !important;
+  }
+
+  .page-week .week-board {
+    --axis-width: 46px !important;
+  }
+
+  .page-week .week-board .week-header > div span {
+    font-size: 9.5px !important;
+  }
+
+  .page-week .week-board .week-header > div b {
+    font-size: 12.5px !important;
   }
 }
