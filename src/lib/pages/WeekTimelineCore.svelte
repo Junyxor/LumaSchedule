@@ -182,14 +182,17 @@
   function paddedTimelineRange(earliest: number, latest: number, hasCourses: boolean) {
     if (!hasCourses) return { start: DEFAULT_DAY_START, end: DEFAULT_DAY_START + MIN_TIMELINE_SPAN };
 
-    let start = Math.max(0, Math.floor((earliest - TIMELINE_PADDING_MINUTES) / 30) * 30);
+    const earliestAllowed = earliest >= DEFAULT_DAY_START
+      ? DEFAULT_DAY_START
+      : Math.max(0, Math.floor((earliest - TIMELINE_PADDING_MINUTES) / 30) * 30);
+    let start = Math.max(earliestAllowed, Math.floor((earliest - TIMELINE_PADDING_MINUTES) / 30) * 30);
     let end = Math.min(24 * 60, Math.ceil((latest + TIMELINE_PADDING_MINUTES) / 30) * 30);
 
     if (end - start < MIN_TIMELINE_SPAN) {
       const center = (start + end) / 2;
-      start = Math.max(0, Math.floor((center - MIN_TIMELINE_SPAN / 2) / 30) * 30);
+      start = Math.max(earliestAllowed, Math.floor((center - MIN_TIMELINE_SPAN / 2) / 30) * 30);
       end = Math.min(24 * 60, start + MIN_TIMELINE_SPAN);
-      if (end - start < MIN_TIMELINE_SPAN) start = Math.max(0, end - MIN_TIMELINE_SPAN);
+      if (end - start < MIN_TIMELINE_SPAN) start = Math.max(earliestAllowed, end - MIN_TIMELINE_SPAN);
     }
 
     return { start, end };
