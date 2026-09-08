@@ -2,7 +2,7 @@
   import { Bell, Building2, CalendarRange, Cloud, Database, Download, ExternalLink, Github, Palette, RefreshCw, Shield, Upload } from 'lucide-svelte';
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import ConfirmSheet from '../components/ConfirmSheet.svelte';
-  import type { CourseReminderSettings, GlassSettings, SchedulePreferences, WebDavCredentials, WebDavProfile } from '../types';
+  import type { CourseReminderSettings, GlassSettings, SchedulePreferences, WebDavCredentials, WebDavProfile, WeekendMode } from '../types';
   import {
     ensureNotificationPermission,
     getCourseReminderSettings,
@@ -47,9 +47,16 @@
   let adapterStatus = '正在读取适配器索引…';
   let confirmAction: ConfirmAction = null;
   const reminderOffsets = [5, 10, 15, 20, 30, 60];
+  const weekendModes: { value: WeekendMode; label: string; hint: string }[] = [
+    { value: 'auto', label: '自动', hint: '只显示本周有课的周末列' },
+    { value: 'weekdays', label: '工作日', hint: '始终只显示周一至周五' },
+    { value: 'sat', label: '仅周六', hint: '固定显示周六，不显示周日' },
+    { value: 'sun', label: '仅周日', hint: '固定显示周日，不显示周六' },
+    { value: 'both', label: '周六+周日', hint: '始终显示完整七天' }
+  ];
 
   onMount(async () => {
-    scheduleDraft = { ...preferences };
+    scheduleDraft = { ...preferences, weekendMode: preferences.weekendMode ?? (preferences.showWeekend === false ? 'weekdays' : 'auto') };
     const [profileResult, reminderResult, schoolResult] = await Promise.allSettled([
       getWebDavProfile(),
       getCourseReminderSettings(),
@@ -92,8 +99,12 @@
     queueGlassSave();
   }
 
-  function toggleSchedule(key: 'showWeekend' | 'showTeacher' | 'showRoom' | 'showTime' | 'compactMode') {
+  function toggleSchedule(key: 'showTeacher' | 'showRoom' | 'showTime' | 'compactMode') {
     scheduleDraft = { ...scheduleDraft, [key]: !scheduleDraft[key] };
+  }
+
+  function setWeekendMode(mode: WeekendMode) {
+    scheduleDraft = { ...scheduleDraft, weekendMode: mode };
   }
 
   async function saveSchedule() {
@@ -249,7 +260,7 @@
   <header class="topbar"><div><span class="eyebrow">设置</span><h1>设置</h1><p>学期、课表显示、提醒、外观、备份与隐私。</p></div></header>
   <div class="settings-layout"><div class="settings-main">
     <article class="settings-card glass-panel">
-      <div class="settings-title"><span><CalendarRange size={19} /></span><div><b>学期与课表</b><p>控制当前周计算、周视图密度与课程信息显示。</p></div></div>
+      <div class="settings-title"><span><CalendarRange size={19} /></span><div><b>学期与课表</b><p>控制当前周计算、周视图列数、密度与课程信息显示。</p></div></div>
       <div class="schedule-form">
         <label class="wide"><span>学期名称</span><input bind:value={scheduleDraft.termName} placeholder="例如 2026-2027 学年第一学期" disabled={!scheduleDraft.hasSchedule} /></label>
         <label><span>开学日期</span><input type="date" bind:value={scheduleDraft.termStart} disabled={!scheduleDraft.hasSchedule} /></label>
@@ -258,8 +269,15 @@
         <label><span>时区</span><input bind:value={scheduleDraft.timezone} placeholder="Asia/Shanghai" disabled={!scheduleDraft.hasSchedule} /></label>
         <label><span>默认显示节数</span><input type="number" min="8" max="30" bind:value={scheduleDraft.defaultSections} /></label>
       </div>
+
+      <div class="weekend-setting">
+        <div><b>周末列</b><span>{weekendModes.find((item) => item.value === scheduleDraft.weekendMode)?.hint}</span></div>
+        <div class="weekend-segments" role="group" aria-label="周末课表显示方式">
+          {#each weekendModes as mode}<button class:active={scheduleDraft.weekendMode === mode.value} on:click={() => setWeekendMode(mode.value)}>{mode.label}</button>{/each}
+        </div>
+      </div>
+
       <div class="display-toggles">
-        <button class="toggle-row" on:click={() => toggleSchedule('showWeekend')}><span><b>显示周末</b><small>关闭后周课表只显示周一至周五</small></span><i class:on={scheduleDraft.showWeekend}></i></button>
         <button class="toggle-row" on:click={() => toggleSchedule('showTeacher')}><span><b>显示教师</b><small>今日页和周课表显示教师信息</small></span><i class:on={scheduleDraft.showTeacher}></i></button>
         <button class="toggle-row" on:click={() => toggleSchedule('showRoom')}><span><b>显示教室</b><small>隐藏后课程卡只保留课程名与时间</small></span><i class:on={scheduleDraft.showRoom}></i></button>
         <button class="toggle-row" on:click={() => toggleSchedule('showTime')}><span><b>显示具体时间</b><small>关闭后优先显示第几节</small></span><i class:on={scheduleDraft.showTime}></i></button>
@@ -328,7 +346,7 @@
     </article>
 
     <a class="about-card glass-panel about-link" href="https://github.com/Junyxor/LumaSchedule" target="_blank" rel="noreferrer"><Github size={19} /><div><b>LumaSchedule · GitHub</b><span>github.com/Junyxor/LumaSchedule · Apache-2.0</span></div><ExternalLink size={15} /></a>
-    <div class="project-sources"><b>参考与数据来源</b><span>拾光课表 / shiguang_warehouse · WakeUp Schedule · CSES / ClassIsland · BetterUntis · AntAlmanac</span><small>第三方项目仅用于协议兼容、产品设计与架构参考；代码和数据继续遵循各自许可证。</small></div>
+    <div class="project-sources"><b>参考与数据来源</b><span>拾光课表 / shiguang_warehouse · TimetableView / 怪兽课表 · ClassIsland · Class Widgets · WakeUp Schedule · CSES / ClassIsland · BetterUntis · AntAlmanac</span><small>第三方项目仅用于协议兼容、产品设计与架构参考；代码和数据继续遵循各自许可证。</small></div>
   </aside></div>
 </section>
 
@@ -350,6 +368,13 @@
   .schedule-form span,.webdav-form span { font-size:10px; color:rgba(60,60,67,.58); padding-left:3px; }
   .schedule-form input,.schedule-form select { min-height:43px; border:1px solid rgba(60,60,67,.08); border-radius:13px; padding:0 12px; background:rgba(118,118,128,.08); color:inherit; outline:none; }
   .schedule-form input:disabled,.schedule-form select:disabled { opacity:.48; }
+  .weekend-setting { margin:14px 0 4px; padding:14px; border:1px solid rgba(60,60,67,.07); border-radius:16px; background:rgba(118,118,128,.045); display:grid; gap:11px; }
+  .weekend-setting > div:first-child { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+  .weekend-setting b { font-size:11px; }
+  .weekend-setting span { color:rgba(60,60,67,.55); font-size:9px; text-align:right; }
+  .weekend-segments { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:6px; }
+  .weekend-segments button { min-height:36px; border:1px solid rgba(118,118,128,.13); border-radius:11px; background:rgba(255,255,255,.38); color:inherit; font-size:10px; }
+  .weekend-segments button.active { border-color:rgba(91,86,214,.30); background:rgba(91,86,214,.11); color:#5751c9; font-weight:700; }
   .display-toggles { display:grid; grid-template-columns:1fr 1fr; gap:0 16px; }
   .display-toggles .toggle-row { min-height:54px; margin-top:0; }
   .schedule-save { justify-content:flex-end; margin-top:12px; }
@@ -376,6 +401,6 @@
   .project-sources b { font-size: 12px; color: inherit; }
   .project-sources span { font-size: 11px; line-height: 1.5; }
   .project-sources small { font-size: 10px; line-height: 1.45; opacity: .75; }
-  @media (max-width:760px) { .display-toggles { grid-template-columns:1fr; } .schedule-form { grid-template-columns:1fr 1fr; } }
+  @media (max-width:760px) { .display-toggles { grid-template-columns:1fr; } .schedule-form { grid-template-columns:1fr 1fr; } .weekend-segments { grid-template-columns:repeat(3,minmax(0,1fr)); } .weekend-setting > div:first-child { display:grid; } .weekend-setting span { text-align:left; } }
   @media (prefers-color-scheme: dark) { .project-sources { color: rgba(235,235,245,.62); } }
 </style>
