@@ -15,6 +15,8 @@ export interface SchedulePreferences {
   timezone: string;
   weekStartsOn: number;
   weekendMode: WeekendMode;
+  /** Legacy migration hint for builds that only had a boolean weekend switch. */
+  showWeekend?: boolean;
   showTeacher: boolean;
   showRoom: boolean;
   showTime: boolean;
