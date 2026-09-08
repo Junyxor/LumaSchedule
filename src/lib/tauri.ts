@@ -1,9 +1,13 @@
 import type {
   BackupSummary,
+  CompatibilityFamily,
   Course,
   CourseMutation,
   CourseReminderSettings,
   GlassSettings,
+  GradeImportBundle,
+  GradeImportResult,
+  GradeSnapshot,
   ImportBundle,
   ImportCommitResult,
   ImportDiff,
@@ -61,6 +65,14 @@ export function deleteScheduleCourse(id: string) {
 export async function saveGlassSettings(settings: GlassSettings) {
   localStorage.setItem('luma.glass', JSON.stringify(settings));
   await invokeNative<void>('save_glass_settings', { settings }).catch(() => undefined);
+}
+
+export function getGradeSnapshot() {
+  return invokeNative<GradeSnapshot>('get_grade_snapshot');
+}
+
+export function commitGradeBundle(bundle: GradeImportBundle) {
+  return invokeNative<GradeImportResult>('commit_grade_bundle', { bundle });
 }
 
 export function previewImport(bundle: ImportBundle) {
@@ -131,6 +143,21 @@ export function startShiguangImport(schoolId: string, adapterId: string) {
   return invokeNative<ShiguangImportStart>('shiguang_start_import', {
     schoolId,
     adapterId
+  });
+}
+
+export function startCompatibilityImport(url: string, family: CompatibilityFamily, schoolName = '') {
+  return invokeNative<ShiguangImportStart>('shiguang_start_custom_import', {
+    url: url.trim(),
+    family,
+    schoolName: schoolName.trim()
+  });
+}
+
+export function startGradeCapture(url: string, institution = '') {
+  return invokeNative<ShiguangImportStart>('shiguang_start_grade_capture', {
+    url: url.trim(),
+    institution: institution.trim()
   });
 }
 
