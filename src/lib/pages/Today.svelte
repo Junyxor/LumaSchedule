@@ -10,7 +10,7 @@
   export let termName: string | null | undefined = null;
   export let preferences: SchedulePreferences = {
     hasSchedule: false, termName: '', termStart: '', weekCount: 20, timezone: 'Asia/Shanghai', weekStartsOn: 1,
-    showWeekend: true, showTeacher: true, showRoom: true, showTime: true, compactMode: false, defaultSections: 12
+    weekendMode: 'auto', showTeacher: true, showRoom: true, showTime: true, compactMode: false, defaultSections: 12
   };
 
   let now = new Date();
