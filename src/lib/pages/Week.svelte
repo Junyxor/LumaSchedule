@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronLeft, ChevronRight } from 'lucide-svelte';
+  import { ChevronLeft, ChevronRight, Plus } from 'lucide-svelte';
   import { createEventDispatcher, onMount } from 'svelte';
   import WeekCore from './WeekCore.svelte';
   import { getFullScheduleSnapshot } from '../weekSchedule';
@@ -22,6 +22,7 @@
   let pointerId: number | null = null;
   let startX = 0;
   let startY = 0;
+  let addRequest = 0;
 
   function parseDate(raw: string) {
     const match = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -141,7 +142,7 @@
       disabled={selectedWeek <= 1}
       aria-label="上一周"
     >
-      <ChevronLeft size={21}/>
+      <ChevronLeft size={20}/>
     </button>
 
     <label class="week-selector">
@@ -175,7 +176,11 @@
       disabled={selectedWeek >= fullWeekCount}
       aria-label="下一周"
     >
-      <ChevronRight size={21}/>
+      <ChevronRight size={20}/>
+    </button>
+
+    <button class="week-add-button" on:click={() => (addRequest += 1)} aria-label="新增课程">
+      <Plus size={20}/>
     </button>
   </div>
 
@@ -187,6 +192,7 @@
       termName={fullTermName}
       displayDate={selectedWeekStart}
       showTopbar={false}
+      {addRequest}
       {preferences}
       on:changed={coreChanged}
     />
@@ -197,155 +203,154 @@
 
 <style>
   .week-shell {
-    display:grid;
-    gap:4px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+    box-sizing: border-box;
   }
 
   .week-toolbar {
-    display:grid;
-    grid-template-columns:38px minmax(0, 1fr) 42px 38px;
-    align-items:center;
-    gap:4px;
-    min-height:52px;
-    padding:5px 7px;
-    border-radius:18px;
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr) 38px 34px 38px;
+    align-items: center;
+    gap: 3px;
+    min-height: 48px;
+    padding: 4px 5px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, .46);
+    border-color: rgba(255, 255, 255, .58);
+    box-shadow: 0 5px 18px rgba(45, 48, 70, .045), inset 0 1px rgba(255, 255, 255, .72);
   }
 
-  .week-arrow {
-    width:38px;
-    height:42px;
-    border:0;
-    border-radius:13px;
-    display:grid;
-    place-items:center;
-    background:transparent;
-    color:#5751c9;
+  .week-arrow,
+  .week-add-button {
+    width: 34px;
+    height: 38px;
+    border: 0;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    background: transparent;
+    color: #5751c9;
   }
 
-  .week-arrow:disabled {
-    opacity:.24;
+  .week-add-button {
+    width: 38px;
+    background: rgba(91, 86, 214, .08);
   }
+
+  .week-arrow:disabled { opacity: .22; }
 
   .week-selector {
-    position:relative;
-    min-width:0;
-    height:42px;
-    display:grid;
-    align-content:center;
-    gap:1px;
-    padding:0 8px;
-    border-radius:13px;
-    background:rgba(91,86,214,.08);
-    cursor:pointer;
+    position: relative;
+    min-width: 0;
+    height: 38px;
+    display: grid;
+    align-content: center;
+    gap: 1px;
+    padding: 0 7px;
+    border-radius: 12px;
+    background: rgba(91, 86, 214, .06);
+    cursor: pointer;
   }
 
   .week-title {
-    min-width:0;
-    display:flex;
-    align-items:center;
-    gap:6px;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 
   .week-title b {
-    font-size:16px;
-    line-height:1.05;
-    letter-spacing:-.03em;
-    white-space:nowrap;
+    font-size: 15px;
+    line-height: 1.05;
+    letter-spacing: -.03em;
+    white-space: nowrap;
   }
 
   .week-title em {
-    padding:2px 5px;
-    border-radius:999px;
-    background:rgba(91,86,214,.13);
-    color:#5751c9;
-    font-size:7px;
-    font-style:normal;
-    font-weight:750;
-    white-space:nowrap;
+    padding: 2px 5px;
+    border-radius: 999px;
+    background: rgba(91, 86, 214, .11);
+    color: #5751c9;
+    font-size: 7px;
+    font-style: normal;
+    font-weight: 750;
+    white-space: nowrap;
   }
 
   .week-date {
-    color:rgba(60,60,67,.47);
-    font-size:8px;
-    line-height:1.2;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis;
+    color: rgba(60, 60, 67, .46);
+    font-size: 7.5px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .week-selector select {
-    position:absolute;
-    inset:0;
-    width:100%;
-    height:100%;
-    opacity:0;
-    cursor:pointer;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
   }
 
   .current-week {
-    width:42px;
-    height:32px;
-    border:0;
-    border-radius:999px;
-    background:rgba(91,86,214,.10);
-    color:#5751c9;
-    font-size:9px;
-    font-weight:700;
+    width: 38px;
+    height: 30px;
+    border: 0;
+    border-radius: 999px;
+    background: rgba(91, 86, 214, .08);
+    color: #5751c9;
+    font-size: 8px;
+    font-weight: 700;
   }
 
   .current-week.active,
-  .current-week:disabled {
-    opacity:.38;
-  }
+  .current-week:disabled { opacity: .36; }
 
   .week-board-swipe {
-    min-height:0;
-    touch-action:pan-y;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    touch-action: pan-y;
   }
 
   .week-loading {
-    text-align:center;
-    color:rgba(60,60,67,.45);
-    font-size:10px;
+    flex: 0 0 auto;
+    text-align: center;
+    color: rgba(60, 60, 67, .45);
+    font-size: 10px;
   }
 
-  @media (max-width:760px) {
+  @media (max-width: 760px) {
+    .week-shell {
+      padding-bottom: calc(78px + env(safe-area-inset-bottom));
+    }
+
     .week-board-swipe {
-      margin-inline:-8px;
+      margin-inline: -10px;
     }
+  }
 
+  @media (min-width: 761px) {
     .week-toolbar {
-      grid-template-columns:34px minmax(0, 1fr) 38px 34px;
-      gap:3px;
-      min-height:48px;
-      padding:4px 6px;
-      border-radius:16px;
+      grid-template-columns: 38px minmax(0, 1fr) 42px 38px 42px;
+      min-height: 52px;
+      padding: 5px 7px;
+      border-radius: 18px;
     }
 
-    .week-arrow {
-      width:34px;
-      height:38px;
-      border-radius:12px;
-    }
-
-    .week-selector {
-      height:38px;
-      padding:0 7px;
-      border-radius:12px;
-    }
-
-    .week-title b {
-      font-size:15px;
-    }
-
-    .week-date {
-      font-size:7.5px;
-    }
-
-    .current-week {
-      width:38px;
-      height:30px;
-      font-size:8px;
-    }
+    .week-arrow { width: 38px; height: 42px; }
+    .week-add-button { width: 42px; height: 42px; }
+    .week-selector { height: 42px; padding: 0 8px; border-radius: 13px; }
+    .week-title b { font-size: 16px; }
+    .current-week { width: 42px; height: 32px; font-size: 9px; }
   }
 </style>

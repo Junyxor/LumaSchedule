@@ -11,6 +11,7 @@
   export let termName: string | null | undefined = null;
   export let displayDate: Date | null = null;
   export let showTopbar = true;
+  export let addRequest = 0;
   export let preferences: SchedulePreferences = {
     hasSchedule: false,
     termName: '',
@@ -39,6 +40,7 @@
   let weeksText = '1-20';
   let creditText = '';
   let draft: CourseMutation = blankDraft();
+  let handledAddRequest = addRequest;
 
   function blankDraft(): CourseMutation {
     return {
@@ -145,6 +147,12 @@
     return [preferences.showRoom ? course.room : '', preferences.showTeacher ? course.teacher : ''].filter(Boolean).join(' · ');
   }
 
+  function creditLabel(value: number | null | undefined) {
+    if (value == null || !Number.isFinite(value)) return '';
+    const text = Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
+    return `${text} 学分`;
+  }
+
   function columnFor(day: number) {
     const index = visibleDayNumbers.indexOf(day);
     return index >= 0 ? index + 1 : 1;
@@ -237,7 +245,7 @@
     editorBusy = true;
     editorError = '';
     try {
-      await deleteScheduleCourse(draft.id);
+      await deleteScheduleCourse(draft.id, draft.name);
       deleteConfirmOpen = false;
       editorOpen = false;
       dispatch('changed');
@@ -256,6 +264,11 @@
     if (timer) clearInterval(timer);
   });
 
+  $: if (addRequest !== handledAddRequest) {
+    handledAddRequest = addRequest;
+    if (addRequest > 0) newCourse();
+  }
+
   $: context = weekContext(displayDate ?? now);
   $: weekendMode = normalizedWeekendMode();
   $: visibleDayNumbers = resolveVisibleDayNumbers(weekendMode, context.order);
@@ -264,7 +277,7 @@
   $: dayCount = visibleDayNumbers.length;
   $: sectionCount = Math.max(preferences.defaultSections || 12, ...visibleCourses.map((course) => course.endSection || 0));
   $: sections = Array.from({ length: sectionCount }, (_, i) => i + 1);
-  $: rowHeight = preferences.compactMode ? 58 : 70;
+  $: rowHeight = preferences.compactMode ? 56 : 66;
   $: firstVisibleDay = visibleDays[0];
   $: lastVisibleDay = visibleDays[visibleDays.length - 1];
   $: rangeLabel = firstVisibleDay && lastVisibleDay
@@ -292,9 +305,9 @@
   {/if}
 
   <div
-    class="week-board content-surface"
+    class="week-board"
     class:compact={preferences.compactMode}
-    style={`--section-count:${sectionCount};--day-count:${dayCount};--row-height:${rowHeight}px;--axis-width:62px`}
+    style={`--section-count:${sectionCount};--day-count:${dayCount};--row-height:${rowHeight}px;--axis-width:54px`}
   >
     <div class="week-header">
       <div class="corner">{preferences.showTime ? '时间' : '节次'}</div>
@@ -331,23 +344,18 @@
           >
             <b>{course.name}</b>
             {#if courseMeta(course)}<span>{courseMeta(course)}</span>{/if}
+            {#if creditLabel(course.credit)}<small class="course-credit">{creditLabel(course.credit)}</small>{/if}
           </button>
         {/each}
 
         {#if !visibleCourses.length}
           <div class="week-empty">
-            {hasSchedule ? `第 ${currentWeek || ''} 周没有课程。` : '还没有课表。你可以导入教务课表，也可以点右上角 + 手动添加。'}
+            {hasSchedule ? `第 ${currentWeek || ''} 周没有课程。` : '还没有课表。你可以导入教务课表，也可以在顶部点 + 手动添加。'}
           </div>
         {/if}
       </div>
     </div>
   </div>
-
-  {#if !showTopbar}
-    <button class="floating-week-add glass-panel" on:click={newCourse} aria-label="新增课程">
-      <Plus size={21} strokeWidth={1.9} />
-    </button>
-  {/if}
 </section>
 
 {#if editorOpen}
@@ -397,7 +405,7 @@
         <label class="wide">
           <span>上课周次</span>
           <input bind:value={weeksText} placeholder="1-16,18,20" />
-          <small>支持 1-16、1,3,5,7、1-8,10-16。学分会用于同名成绩缺少学分时自动匹配。</small>
+          <small>支持 1-16、1,3,5,7、1-8,10-16。学分会显示在课表，并在同名成绩缺少学分时用于加权统计。</small>
         </label>
       </div>
 
@@ -432,59 +440,95 @@
   .page-week-core {
     position: relative;
     width: 100%;
+    height: 100%;
     min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 
   .week-topbar { align-items: center; }
 
-  .week-add,
-  .floating-week-add {
+  .week-add {
+    width: 44px;
+    height: 44px;
+    border-radius: 22px;
     border: 0;
     display: grid;
     place-items: center;
     color: #5b56d6;
-  }
-
-  .week-add {
-    width: 46px;
-    height: 46px;
-    border-radius: 23px;
     flex: none;
   }
 
-  .floating-week-add {
-    position: absolute;
-    right: 10px;
-    top: 14px;
-    z-index: 8;
-    width: 42px;
-    height: 42px;
-    border-radius: 21px;
+  .week-board {
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 0;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .28);
+    box-shadow: none;
   }
 
   .week-board .week-header {
+    flex: 0 0 auto;
     display: grid;
     grid-template-columns: var(--axis-width) repeat(var(--day-count), minmax(0, 1fr));
-    height: 62px;
+    height: 56px;
+    background: rgba(255, 255, 255, .22);
+    border: 0;
+    box-shadow: inset 0 -1px rgba(60, 60, 67, .035);
   }
 
   .week-board .week-header > div {
     min-width: 0;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 2px;
+    color: rgba(60, 60, 67, .56);
+  }
+
+  .week-board .week-header > div span {
+    font-size: 9px;
+    white-space: nowrap;
+  }
+
+  .week-board .week-header > div b {
+    font-size: 12px;
+    line-height: 1;
+    font-weight: 700;
   }
 
   .week-board .week-header .corner {
-    font-size: 9px;
+    font-size: 8.5px;
     letter-spacing: .02em;
+    color: rgba(60, 60, 67, .42);
+  }
+
+  .week-board .week-header .today {
+    color: #5751c9;
+    background: rgba(91, 86, 214, .055);
   }
 
   .week-board .week-scroll {
     position: relative;
-    padding-left: 0;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: auto;
+    padding: 0;
     overflow-x: hidden;
     overflow-y: auto;
-    height: calc(100dvh - 186px);
-    min-height: 520px;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    background: transparent;
   }
+
+  .week-board .week-scroll::-webkit-scrollbar { display: none; }
 
   .week-body-grid {
     position: relative;
@@ -494,7 +538,7 @@
     width: 100%;
     min-width: 0;
     min-height: calc(var(--section-count) * var(--row-height));
-    background: rgba(255, 255, 255, .22);
+    background: transparent;
   }
 
   .section-time {
@@ -503,39 +547,39 @@
     display: grid;
     align-content: center;
     justify-items: center;
-    gap: 2px;
-    padding: 4px 2px;
-    border-right: 1px solid rgba(77, 82, 102, .08);
-    border-bottom: 1px solid rgba(77, 82, 102, .07);
-    background: rgba(255, 255, 255, .34);
-    color: rgba(60, 60, 67, .58);
+    gap: 1px;
+    padding: 3px 1px;
+    border-right: 1px solid rgba(77, 82, 102, .03);
+    border-bottom: 1px solid rgba(77, 82, 102, .04);
+    background: rgba(255, 255, 255, .08);
+    color: rgba(60, 60, 67, .5);
     font-variant-numeric: tabular-nums;
   }
 
   .section-time small {
+    font-size: 7px;
+    line-height: 1.05;
+    color: rgba(60, 60, 67, .38);
+  }
+
+  .section-time b {
+    font-size: 9px;
+    line-height: 1.08;
+    font-weight: 650;
+    color: rgba(45, 45, 52, .66);
+  }
+
+  .section-time span {
     font-size: 7.5px;
     line-height: 1.05;
     color: rgba(60, 60, 67, .42);
   }
 
-  .section-time b {
-    font-size: 9.5px;
-    line-height: 1.1;
-    font-weight: 650;
-    color: rgba(45, 45, 52, .72);
-  }
-
-  .section-time span {
-    font-size: 8px;
-    line-height: 1.05;
-    color: rgba(60, 60, 67, .48);
-  }
-
   .week-cell {
     z-index: 0;
     min-width: 0;
-    border-left: 1px solid rgba(77, 82, 102, .055);
-    border-bottom: 1px solid rgba(77, 82, 102, .07);
+    border-left: 1px solid rgba(77, 82, 102, .018);
+    border-bottom: 1px solid rgba(77, 82, 102, .04);
   }
 
   .week-body-grid .week-course {
@@ -549,54 +593,66 @@
     align-self: stretch;
     justify-self: stretch;
     z-index: 3;
-    margin: 4px 3px;
-    padding: 8px 6px;
+    margin: 3px 2px;
+    padding: 7px 5px;
     border: 0;
-    border-radius: 12px;
+    border-radius: 10px;
     text-align: left;
     font: inherit;
     cursor: pointer;
     overflow: hidden;
+    box-shadow: 0 2px 7px rgba(55, 56, 78, .035);
   }
 
   .week-body-grid .week-course b {
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
     word-break: break-all;
+    font-size: 9.5px;
+    line-height: 1.2;
   }
 
   .week-body-grid .week-course span {
     display: block;
-    margin-top: 4px;
+    margin-top: 3px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-size: 8px;
+    line-height: 1.15;
+    opacity: .72;
+  }
+
+  .week-body-grid .week-course .course-credit {
+    display: block;
+    margin-top: 3px;
+    font-size: 7.5px;
+    line-height: 1.1;
+    font-weight: 650;
+    opacity: .68;
   }
 
   .week-board.compact .week-course {
-    padding: 7px 5px;
-    border-radius: 10px;
+    margin: 2px;
+    padding: 6px 4px;
+    border-radius: 9px;
   }
 
-  .week-board.compact .week-course b {
-    font-size: 9px;
-  }
+  .week-board.compact .week-course b { font-size: 9px; }
 
   .week-empty {
-    position: sticky;
-    left: var(--axis-width);
     grid-column: 2 / -1;
-    grid-row: 2 / span 2;
+    grid-row: 2 / span 3;
     z-index: 4;
     align-self: center;
     justify-self: center;
-    max-width: 260px;
-    padding: 18px;
+    max-width: 250px;
+    padding: 14px;
     text-align: center;
-    color: rgba(60, 60, 67, .55);
-    font-size: 13px;
+    color: rgba(60, 60, 67, .48);
+    font-size: 12px;
     line-height: 1.55;
     pointer-events: none;
   }
@@ -761,28 +817,12 @@
   .editor-actions button:disabled { opacity: .55; }
 
   @media (max-width: 760px) {
-    .week-board {
-      --axis-width: 58px !important;
-    }
-
-    .week-board .week-header {
-      height: 58px;
-    }
-
-    .week-board .week-scroll {
-      height: calc(100dvh - 176px);
-      min-height: 540px;
-    }
-
-    .week-body-grid .week-course {
-      margin: 3px 2px;
-      padding: 7px 5px;
-      border-radius: 11px;
-    }
-
-    .section-time small { font-size: 7px; }
-    .section-time b { font-size: 9px; }
-    .section-time span { font-size: 7.5px; }
+    .week-board { --axis-width: 52px !important; }
+    .week-board .week-header { height: 54px; }
+    .week-body-grid .week-course { margin: 3px 2px; padding: 6px 4px; }
+    .section-time small { font-size: 6.8px; }
+    .section-time b { font-size: 8.5px; }
+    .section-time span { font-size: 7px; }
   }
 
   @media (min-width: 761px) {
