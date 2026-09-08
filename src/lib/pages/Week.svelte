@@ -1,205 +1,102 @@
 <script lang="ts">
-  import { ChevronLeft, ChevronRight, Plus, Trash2, X } from 'lucide-svelte';
-  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
-  import ConfirmSheet from '../components/ConfirmSheet.svelte';
-  import { deleteScheduleCourse, saveScheduleCourse } from '../tauri';
+  import { ChevronLeft, ChevronRight } from 'lucide-svelte';
+  import { afterUpdate, createEventDispatcher, onMount, tick } from 'svelte';
+  import WeekCore from './WeekCore.svelte';
   import { getFullScheduleSnapshot } from '../weekSchedule';
-  import type { Course, CourseMutation, SchedulePreferences, WeekendMode } from '../types';
+  import type { Course, SchedulePreferences, WeekendMode } from '../types';
 
   export let courses: Course[];
   export let hasSchedule = false;
   export let currentWeek: number | null | undefined = null;
   export let termName: string | null | undefined = null;
-  export let preferences: SchedulePreferences = {
-    hasSchedule: false, termName: '', termStart: '', weekCount: 20, timezone: 'Asia/Shanghai', weekStartsOn: 1,
-    weekendMode: 'auto', showTeacher: true, showRoom: true, showTime: true, compactMode: false, defaultSections: 12
-  };
+  export let preferences: SchedulePreferences;
 
   const dispatch = createEventDispatcher<{ changed: void }>();
-  const weekdayNames = ['å‘¨ä¸€','å‘¨äºŒ','å‘¨ä¸‰','å‘¨å››','å‘¨äº”','å‘¨å…­','å‘¨æ—¥'];
-  const sectionOptions = Array.from({ length: 30 }, (_, index) => index + 1);
-  let now = new Date();
-  let timer: ReturnType<typeof setInterval> | null = null;
-  let editorOpen = false;
-  let editorBusy = false;
-  let editorError = '';
-  let deleteConfirmOpen = false;
-  let weeksText = '1-20';
-  let draft: CourseMutation = blankDraft();
-
+  let root: HTMLDivElement;
+  let controls: HTMLDivElement;
   let allCourses: Course[] = courses;
   let fullHasSchedule = hasSchedule;
   let fullTermName = termName || preferences.termName || '';
   let fullTermStart = preferences.termStart || '';
   let fullWeekCount = preferences.weekCount || 20;
-  let fullSnapshotReady = false;
   let selectedWeek = currentWeek || 1;
-  let weekTouched = false;
-  let swipePointerId: number | null = null;
-  let swipeStartX = 0;
-  let swipeStartY = 0;
-  let lastSwipeAt = 0;
+  let touched = false;
+  let loaded = false;
+  let pointerId: number | null = null;
+  let startX = 0;
+  let startY = 0;
+  let patchQueued = false;
 
-  function blankDraft(): CourseMutation {
-    return {
-      id: null,
-      name: '',
-      teacher: '',
-      room: '',
-      day: ((new Date().getDay() + 6) % 7) + 1,
-      startSection: 1,
-      endSection: 2,
-      start: '',
-      end: '',
-      weeks: Array.from({ length: preferences.weekCount || 20 }, (_, index) => index + 1)
-    };
+  function clampWeek(value: number) {
+    return Math.max(1, Math.min(Math.max(1, fullWeekCount), Math.trunc(value || 1)));
   }
 
-  function weekContext(date: Date) {
-    const sundayFirst = preferences.weekStartsOn === 7;
-    const jsDay = date.getDay();
-    const offset = sundayFirst ? jsDay : (jsDay + 6) % 7;
-    const start = new Date(date);
-    start.setHours(0, 0, 0, 0);
-    start.setDate(date.getDate() - offset);
-    const order = sundayFirst ? [7,1,2,3,4,5,6] : [1,2,3,4,5,6,7];
-    const days = new Map<number, { label: string; dayNumber: number; date: string; month: number; fullDate: Date }>();
-    order.forEach((dayNumber, index) => {
-      const item = new Date(start);
-      item.setDate(start.getDate() + index);
-      days.set(dayNumber, {
-        label: weekdayNames[dayNumber - 1],
-        dayNumber,
-        date: String(item.getDate()).padStart(2, '0'),
-        month: item.getMonth() + 1,
-        fullDate: item
-      });
-    });
-    return { days, order };
+  function selectWeek(value: number) {
+    const next = clampWeek(value);
+    if (next === selectedWeek) return;
+    selectedWeek = next;
+    touched = true;
   }
 
-  function parseLocalDate(raw: string) {
+  function parseDate(raw: string) {
     const match = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (!match) return null;
-    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0, 0);
-    return Number.isNaN(date.getTime()) ? null : date;
+    const value = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12);
+    return Number.isNaN(value.getTime()) ? null : value;
   }
 
-  function selectedWeekAnchor() {
-    const termStart = parseLocalDate(fullTermStart || preferences.termStart || '');
+  function mondayOf(date: Date) {
+    const copy = new Date(date);
+    copy.setHours(12, 0, 0, 0);
+    copy.setDate(copy.getDate() - ((copy.getDay() + 6) % 7));
+    return copy;
+  }
+
+  function weekMonday() {
+    const termStart = parseDate(fullTermStart || preferences.termStart || '');
     if (termStart) {
-      const anchor = new Date(termStart);
-      anchor.setDate(termStart.getDate() + (selectedWeek - 1) * 7);
-      return anchor;
+      const base = mondayOf(termStart);
+      base.setDate(base.getDate() + (selectedWeek - 1) * 7);
+      return base;
     }
-    if (currentWeek && currentWeek > 0) {
-      const anchor = new Date(now);
-      anchor.setDate(now.getDate() + (selectedWeek - currentWeek) * 7);
-      return anchor;
-    }
-    return now;
+    const base = mondayOf(new Date());
+    if (currentWeek && currentWeek > 0) base.setDate(base.getDate() + (selectedWeek - currentWeek) * 7);
+    return base;
   }
 
-  function normalizedWeekendMode(): WeekendMode {
-    if (preferences.weekendMode) return preferences.weekendMode;
-    return preferences.showWeekend === false ? 'weekdays' : 'auto';
+  function weekendMode(): WeekendMode {
+    return preferences.weekendMode || (preferences.showWeekend === false ? 'weekdays' : 'auto');
   }
 
-  function resolveVisibleDayNumbers(mode: WeekendMode, order: number[], items: Course[]) {
-    const included = new Set([1,2,3,4,5]);
+  function visibleDayNumbers(items: Course[]) {
+    const included = new Set([1, 2, 3, 4, 5]);
+    const mode = weekendMode();
     if (mode === 'sat' || mode === 'both') included.add(6);
     if (mode === 'sun' || mode === 'both') included.add(7);
     if (mode === 'auto') {
       if (items.some((course) => course.day === 6)) included.add(6);
       if (items.some((course) => course.day === 7)) included.add(7);
     }
+    const order = preferences.weekStartsOn === 7 ? [7, 1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5, 6, 7];
     return order.filter((day) => included.has(day));
   }
 
-  function weeksToText(weeks: number[]) {
-    if (!weeks.length) return `1-${preferences.weekCount || 20}`;
-    const sorted = [...new Set(weeks)].sort((a, b) => a - b);
-    const parts: string[] = [];
-    let start = sorted[0];
-    let previous = sorted[0];
-    for (let index = 1; index <= sorted.length; index += 1) {
-      const value = sorted[index];
-      if (value === previous + 1) { previous = value; continue; }
-      parts.push(start === previous ? `${start}` : `${start}-${previous}`);
-      start = value;
-      previous = value;
-    }
-    return parts.join(',');
+  function dateForDay(day: number) {
+    const monday = weekMonday();
+    const date = new Date(monday);
+    date.setDate(monday.getDate() + (day - 1));
+    return date;
   }
 
-  function parseWeeks(raw: string) {
-    const result = new Set<number>();
-    const tokens = raw.replace(/ï¼Œ/g, ',').split(/[\s,]+/).map((token) => token.trim()).filter(Boolean);
-    for (const token of tokens) {
-      const range = token.match(/^(\d{1,2})\s*[-~è‡³]\s*(\d{1,2})$/);
-      if (range) {
-        const from = Math.max(1, Math.min(64, Number(range[1])));
-        const to = Math.max(1, Math.min(64, Number(range[2])));
-        for (let week = Math.min(from, to); week <= Math.max(from, to); week += 1) result.add(week);
-        continue;
-      }
-      const week = Number(token);
-      if (Number.isInteger(week) && week >= 1 && week <= 64) result.add(week);
-    }
-    return [...result].sort((a, b) => a - b);
+  function rangeLabel(items: Course[]) {
+    const days = visibleDayNumbers(items);
+    if (!days.length) return '';
+    const first = dateForDay(days[0]);
+    const last = dateForDay(days[days.length - 1]);
+    return `${first.getMonth() + 1}æœˆ${first.getDate()}æ—¥ â€“ ${last.getMonth() + 1}æœˆ${last.getDate()}æ—¥`;
   }
 
-  function courseMeta(course: Course) {
-    return [preferences.showRoom ? course.room : '', preferences.showTeacher ? course.teacher : ''].filter(Boolean).join(' Â· ');
-  }
-
-  function columnFor(day: number) {
-    const index = visibleDayNumbers.indexOf(day);
-    return index >= 0 ? index + 1 : 1;
-  }
-
-  function clampWeek(value: number) {
-    return Math.max(1, Math.min(Math.max(1, fullWeekCount || 20), Math.trunc(value || 1)));
-  }
-
-  function changeWeek(value: number) {
-    const next = clampWeek(value);
-    if (next === selectedWeek) return;
-    selectedWeek = next;
-    weekTouched = true;
-  }
-
-  function goCurrentWeek() {
-    if (currentWeek && currentWeek > 0) changeWeek(currentWeek);
-  }
-
-  function onWeekSelect(event: Event) {
-    changeWeek(Number((event.currentTarget as HTMLSelectElement).value));
-  }
-
-  function beginWeekSwipe(event: PointerEvent) {
-    if (event.pointerType === 'mouse') return;
-    swipePointerId = event.pointerId;
-    swipeStartX = event.clientX;
-    swipeStartY = event.clientY;
-  }
-
-  function endWeekSwipe(event: PointerEvent) {
-    if (event.pointerId !== swipePointerId) return;
-    swipePointerId = null;
-    const dx = event.clientX - swipeStartX;
-    const dy = event.clientY - swipeStartY;
-    if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
-    const before = selectedWeek;
-    changeWeek(selectedWeek + (dx < 0 ? 1 : -1));
-    if (selectedWeek !== before) lastSwipeAt = Date.now();
-  }
-
-  function cancelWeekSwipe(event: PointerEvent) {
-    if (event.pointerId === swipePointerId) swipePointerId = null;
-  }
-
-  async function reloadFullSchedule() {
+  async function reload() {
     try {
       const snapshot = await getFullScheduleSnapshot();
       allCourses = snapshot.courses;
@@ -207,113 +104,120 @@
       fullTermName = snapshot.termName || termName || preferences.termName || '';
       fullTermStart = snapshot.termStart || preferences.termStart || '';
       fullWeekCount = snapshot.weekCount || preferences.weekCount || 20;
-      if (!weekTouched) selectedWeek = clampWeek(currentWeek || 1);
-      else selectedWeek = clampWeek(selectedWeek);
-      fullSnapshotReady = true;
+      selectedWeek = clampWeek(touched ? selectedWeek : (currentWeek || 1));
+      loaded = true;
     } catch {
       allCourses = courses;
       fullHasSchedule = hasSchedule;
       fullTermName = termName || preferences.termName || '';
       fullTermStart = preferences.termStart || '';
       fullWeekCount = preferences.weekCount || 20;
-      selectedWeek = clampWeek(selectedWeek || currentWeek || 1);
     }
+    queuePatch();
   }
 
-  function newCourse() {
-    draft = blankDraft();
-    weeksText = `1-${preferences.weekCount || 20}`;
-    editorError = '';
-    editorOpen = true;
+  function queuePatch() {
+    if (patchQueued) return;
+    patchQueued = true;
+    void tick().then(() => {
+      patchQueued = false;
+      patchCore();
+    });
   }
 
-  function editCourse(course: Course) {
-    if (Date.now() - lastSwipeAt < 280) return;
-    draft = {
-      id: course.id,
-      name: course.name,
-      teacher: course.teacher,
-      room: course.room,
-      day: course.day,
-      startSection: course.startSection,
-      endSection: course.endSection,
-      start: course.start,
-      end: course.end,
-      weeks: [...course.weeks]
-    };
-    weeksText = weeksToText(course.weeks);
-    editorError = '';
-    editorOpen = true;
+  function patchCore() {
+    if (!root) return;
+    const topbar = root.querySelector<HTMLElement>('.week-topbar');
+    if (topbar && controls && controls.previousElementSibling !== topbar) topbar.after(controls);
+    const items = weekCourses;
+    const eyebrow = root.querySelector<HTMLElement>('.week-topbar .eyebrow');
+    if (eyebrow) eyebrow.textContent = rangeLabel(items);
+    const subtitle = root.querySelector<HTMLElement>('.week-topbar p');
+    if (subtitle) subtitle.textContent = [fullTermName, selectedWeek === currentWeek ? 'æœ¬å‘¨' : '', items.length ? `${items.length} ä¸ªè¯¾ç¨‹æ—¶æ®µ` : `ç¬¬ ${selectedWeek} å‘¨æš‚æ— è¯¾ç¨‹`].filter(Boolean).join(' Â· ');
+
+    const days = visibleDayNumbers(items);
+    const headers = root.querySelectorAll<HTMLElement>('.week-header > div:not(.corner)');
+    headers.forEach((header, index) => {
+      const day = days[index];
+      const date = day ? dateForDay(day) : null;
+      const number = header.querySelector<HTMLElement>('b');
+      if (number && date) number.textContent = String(date.getDate()).padStart(2, '0');
+      header.classList.toggle('today', Boolean(selectedWeek === currentWeek && day === (((new Date()).getDay() + 6) % 7) + 1));
+    });
+    const empty = root.querySelector<HTMLElement>('.week-empty');
+    if (empty && fullHasSchedule && !items.length) empty.textContent = `ç¬¬ ${selectedWeek} å‘¨æ²¡æœ‰è¯¾ç¨‹ã€‚å¯ä»¥å·¦å³æ»‘åŠ¨æŸ¥çœ‹å…¶å®ƒå‘¨ã€‚`;
   }
 
-  async function saveEditor() {
-    editorError = '';
-    if (!draft.name.trim()) { editorError = 'è¯·è¾“å…¥è¯¾ç¨‹åç§°ã€‚'; return; }
-    if (draft.endSection < draft.startSection) { editorError = 'ç»“æŸèŠ‚æ¨±ä¸èƒ½æ—©äºå¼€å§‹èŠ‚æ¨±ã€‚w; return; }
-    const weeks = parseWeeks(weeksText);
-    if (!weeks.length) { editorError = 'è¯·è¾“å…¥æœ‰æ•ˆå‘¨ã€‚ä¾‹ 1-16 æˆ– 1,3,5,7ã€‚w; return; }
-    editorBusy = true;
-    try {
-      await saveScheduleCourse({ ...draft, name: draft.name.trim(), teacher: draft.teacher.trim(), room: draft.room.trim(), weeks });
-      editorOpen = false;
-      await reloadFullSchedule();
-      dispatch('changed');
-    } catch (error) {
-      editorError = error instanceof Error ? error.message : String(error);
-    } finally {
-      editorBusy = false;
-    }
+  function onSelect(event: Event) {
+    selectWeek(Number((event.currentTarget as HTMLSelectElement).value));
+    queuePatch();
   }
 
-  function requestDelete() {
-    if (draft.id && !editorBusy) deleteConfirmOpen = true;
+  function beginSwipe(event: PointerEvent) {
+    if (event.pointerType === 'mouse') return;
+    pointerId = event.pointerId;
+    startX = event.clientX;
+    startY = event.clientY;
   }
 
-  async function confirmDelete() {
-    if (!draft.id || editorBusy) return;
-    editorBusy = true;
-    editorError = '';
-    try {
-      await deleteScheduleCourse(draft.id);
-      deleteConfirmOpen = false;
-      editorOpen = false;
-      await reloadFullSchedule();
-      dispatch('changed');
-    } catch (error) {
-      editorError = error instanceof Error ? error.message : String(error);
-    } finally {
-      editorBusy = false;
-    }
+  function endSwipe(event: PointerEvent) {
+    if (event.pointerId !== pointerId) return;
+    pointerId = null;
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+    if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
+    selectWeek(selectedWeek + (dx < 0 ? 1 : -1));
+    queuePatch();
   }
 
-  function onDataChanged() { void reloadFullSchedule(); }
+  function coreChanged() {
+    void reload();
+    dispatch('changed');
+  }
 
-  onMount(() => {
-    timer = setInterval(() => (now = new Date()), 60_000);
-    void reloadFullSchedule();
-    window.addEventListener('luma-data-changed', onDataChanged);
-  });
-  onDestroy(() => {
-    if (timer) clearInterval(timer);
-    window.removeEventListener('luma-data-changed', onDataChanged);
-  });
+  onMount(() => { void reload(); });
+  afterUpdate(queuePatch);
 
-  $: if (!weekTouched && currentWeek && currentWeek > 0 && selectedWeek !== currentWeek) selectedWeek = clampWeek(currentWeek);
-  $: inchor = selectedWeekAnchor();
-  $: kontext = weekContext(anchor);
-  $: ictualTodayDayNumber = ((now.getDay() + 6) % 7) + 1;
- $: isCourrentSelected = Boolean(currentWeek && selectedWeek === currentWeek);
+  $: if (!touched && currentWeek && currentWeek > 0 && selectedWeek !== currentWeek) selectedWeek = clampWeek(currentWeek);
   $: weekCourses = allCourses.filter((course) => !course.weeks?.length || course.weeks.includes(selectedWeek));
-  $: keekendMode = normalizedWeekendMode();
-  $: visibleDayNumbers = resolveVisibleDayNumbers(weekendMode, kontext.order, weekCourses);
- $: isibleDays = visibleDayNumbers.map((day) => kontext.days.get(day)).filter((day): day is NonNullable<typeof day> => Boolean(day));
-  $: isibleCourses = weekCourses.filter((course) => visibleDayNumbers.includes(course.day));
-  $: hayCount = visibleDayNumbers.length;
-  $: iectionCount = Math.max(preferences.defaultSections || 12, ...visibleCourses.map((course) => course.endSection || 0));
- $: iections = Array.from({ length: sectionCount }, (_, i) => i + 1);
-  $: rowHeight = preferences.compactMode ? 54 : 65;
-  $: irstVisibleDay = visibleDays[0];
-  $: lastVisibleDay = visibleDays[visibleDays.length - 1];
- $: hangeLabel = firstVisibleDay && lastVisibleDay ? `${firstVisibleDay.month}æœˆä{firstVisibleDay.fullDate.getDate()}æ—¥ â€“ ${lastVisibleDay.month}æœ‰${lastVisibleDay.fullDate.getDate()}æ—¥` : '';
-  $: title = fullHasSchedule ? `ç¬¬ ${selectedWeek} å‘©` : 'æœ¬å‘¨è¯¾è¡¨';
-  $: subtitle = [fullTermName, fullHasSchedule && isCurrentSelected ? 'æœ¬å‘¨ˆ	ÉËš\ÚX›PÛİ\œÙ\Ë›[™İÈ	İš\ÚX›PÛİ\œÙ\Ë›[™İH9.*º+ï¹ê"ù¥í¹«­Xˆ[\ÔØÚY[HÈ	ÜÙ[XİYÙYZßH9dj9¦ ¹¥è:+ï¹ê"Øˆ	ú/æ9¬¨y§"z+ïº(jÒæf–ÇFW"„&ööÆVâ’æ¦ö–â‚r+rr“°¢C¢vVV´÷F–öç2Ò'&’æg&öÒ‡²ÆVæwFƒ¢ÖF‚æÖ‚ƒÂgVÆÅvVV´6÷VçBÇÂ#’ÒÂ…òÂ–æFW‚’Óâ–æFW‚²“°£Â÷67&—Cà £Ç6V7F–öâ6Æ73Ò'vRvR×vVV²#à¢Æ†VFW"6Æ73Ò'F÷&"vVV²×F÷&"#à¢ÆF—cà¢Ç7â6Æ73Ò&W–V'&÷r#ç·&ævTÆ&VÇÓÂ÷7ãà¢Æƒç·F—FÆWÓÂöƒà¢Çç·7V'F—FÆWÓÂ÷à¢ÂöF—cà¢Æ'WGFöâ6Æ73Ò'vVV²ÖFBvÆ72×æVÂ"öã¦6Æ–6³×¶æWt6÷W'6WÒ&–ÖÆ&VÃÒ.ikZ)îŠûîzˆ¾"#ãÅÇW26—¦S×³#'Ò7G&ö¶Uv–GFƒ×³ã—ÒóãÂö'WGFöãà¢Âö†VFW#à ¢²6–bgVÆÄ†566†VGVÆWĞ¢ÆF—b6Æ73Ò'vVV²×7v—F6†W"vÆ72×æVÂ"&–ÖÆ&VÃÒ.Xˆ~hÚ.iYZÚ~Y‚#à¢Æ'WGFöâöã¦6Æ–6³×²‚’Óâ6†ævUvVV²‡6VÆV7FVEvVV²Ò—ÒF—6&ÆVC×·6VÆV7FVEvVV²ÃÒÒ&–ÖÆ&VÃÒ.Kˆ®KˆY‚#ãÄ6†Wg&öäÆVgB6—¦S×³‡ÒóãÂö'WGFöãà¢ÆÆ&VÂ6Æ73Ò'vVV²Ö§V×#à¢Ç7ãîzÊÂ•ç-yÕzOßºYVyé¢éíşÊZÉš–Wî–T§j›!¢Ô^iÜ¿²f¥–Ç¥yËoj[±é^r×Yç¤¢w!jx¢uzD•ç-j¸š•¦Ş•æœ‡êmŠ‰ìjÌzJ)¶*'½©n{““ú)¶*'ıæœ‡û•ç-şV›zVî¶Ú'¢w%‰É
+  $: weekOptions = Array.from({ length: Math.max(1, fullWeekCount) }, (_, index) => index + 1);
+</script>
+
+<div class="week-pager" bind:this={root} on:pointerdown={beginSwipe} on:pointerup={endSwipe}>
+  <WeekCore
+    courses={weekCourses}
+    hasSchedule={fullHasSchedule}
+    currentWeek={selectedWeek}
+    termName={fullTermName}
+    {preferences}
+    on:changed={coreChanged}
+  />
+  {#if fullHasSchedule}
+    <div class="week-switcher glass-panel" bind:this={controls} aria-label="åˆ‡æ¢æ•™å­¦å‘¨">
+      <button on:click={() => selectWeek(selectedWeek - 1)} disabled={selectedWeek <= 1} aria-label="ä¸Šä¸€å‘¨"><ChevronLeft size={18} /></button>
+      <label class="week-jump">
+        <span>ç¬¬ {selectedWeek} / {fullWeekCount} å‘¨</span>
+        <small>{loaded ? 'å·¦å³æ»‘åŠ¨è¯¾è¡¨ä¹Ÿå¯ä»¥åˆ‡å‘¨' : 'æ­£åœ¨è½½å…¥æ•´å­¦æœŸè¯¾è¡¨â€¦'}</small>
+        <select value={selectedWeek} on:change={onSelect} aria-label="è·³è½¬åˆ°æŒ‡å®šå‘¨">
+          {#each weekOptions as week}<option value={week}>ç¬¬ {week} å‘¨</option>{/each}
+        </select>
+      </label>
+      <button on:click={() => selectWeek(selectedWeek + 1)} disabled={selectedWeek >= fullWeekCount} aria-label="ä¸‹ä¸€å‘¨"><ChevronRight size={18} /></button>
+      {#if currentWeek && selectedWeek !== currentWeek}<button class="back-current" on:click={() => selectWeek(currentWeek || 1)}>æœ¬å‘¨</button>{/if}
+    </div>
+  {/if}
+</div>
+
+<style>
+  .week-pager { display: contents; }
+  .week-switcher { min-height: 48px; margin: -8px 0 12px; padding: 5px; border-radius: 18px; display: grid; grid-template-columns: 38px minmax(0,1fr) 38px auto; align-items: center; gap: 4px; }
+  .week-switcher > button { width: 38px; height: 38px; border: 0; border-radius: 13px; display: grid; place-items: center; background: rgba(118,118,128,.07); color: #5751c9; }
+  .week-switcher > button:disabled { opacity: .28; }
+  .week-switcher .back-current { width: auto; padding: 0 10px; font-size: 11px; font-weight: 650; white-space: nowrap; }
+  .week-jump { position: relative; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 0 8px; cursor: pointer; }
+  .week-jump span { font-size: 12px; font-weight: 680; color: #23232a; }
+  .week-jump small { margin-top: 1px; font-size: 8px; color: rgba(60,60,67,.48); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .week-jump select { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+  :global(.page-week .week-board) { touch-action: pan-y; }
+  @media (max-width:760px) { .week-switcher { margin-top:-6px; } }
+</style>
