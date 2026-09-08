@@ -30,13 +30,13 @@ class ShiguangRepository(private val context: Context) {
 
     fun listAdapters(schoolId: String): JSONArray {
         val school = schools().firstOrNull { it.id.equals(schoolId, ignoreCase = true) }
-            ?: error("拾光适配仓库中找不到学校：$schoolId")
+            ?: error("适配仓库中找不到学校：$schoolId")
         return JSONArray(adapters(school).map { it.toJson() })
     }
 
     fun startImport(activity: Activity, schoolId: String, adapterId: String): JSONObject {
         val school = schools().firstOrNull { it.id.equals(schoolId, ignoreCase = true) }
-            ?: error("拾光适配仓库中找不到学校：$schoolId")
+            ?: error("适配仓库中找不到学校：$schoolId")
         val adapter = adapters(school).firstOrNull { it.adapterId == adapterId }
             ?: error("找不到适配器：$adapterId")
         require(adapter.importUrl.startsWith("https://") || adapter.importUrl.startsWith("http://")) { "适配器登录地址无效" }
@@ -69,6 +69,37 @@ class ShiguangRepository(private val context: Context) {
             importUrl = url,
             script = script,
             adapterName = "兼容模式 · ${adapter.adapterName}",
+            schoolName = displaySchool,
+            captureKind = "schedule",
+            manualTrigger = true
+        )
+    }
+
+    fun startSmartImport(activity: Activity, rawUrl: String, schoolName: String): JSONObject {
+        val url = normalizeCustomUrl(rawUrl)
+        val displaySchool = schoolName.trim().ifBlank { Uri.parse(url).host.orEmpty() }
+        val detectedFamily = detectGenericFamily(url)
+        if (detectedFamily != null) {
+            val school = schools().firstOrNull { it.id.equals(detectedFamily, ignoreCase = true) }
+            val adapter = school?.let(::adapters)?.firstOrNull()
+            if (school != null && adapter != null && adapter.assetJsPath.isNotBlank()) {
+                val script = readAsset(safeAssetPath("shiguang_warehouse/resources/${school.resourceFolder}/${adapter.assetJsPath}"))
+                return launchSession(
+                    activity = activity,
+                    importUrl = url,
+                    script = script,
+                    adapterName = "智能识别 · ${adapter.adapterName}",
+                    schoolName = displaySchool,
+                    captureKind = "schedule",
+                    manualTrigger = true
+                )
+            }
+        }
+        return launchSession(
+            activity = activity,
+            importUrl = url,
+            script = SMART_SCHEDULE_CAPTURE_SCRIPT,
+            adapterName = "智能兼容",
             schoolName = displaySchool,
             captureKind = "schedule",
             manualTrigger = true
@@ -251,7 +282,7 @@ class ShiguangRepository(private val context: Context) {
         val termName = config?.optString("semesterName").orEmpty().ifBlank { "$schoolName · 导入学期" }
 
         return JSONObject()
-            .put("source", "Shiguang · $adapterName")
+            .put("source", "Luma · $adapterName")
             .put("termName", termName)
             .put("termStart", termStart ?: JSONObject.NULL)
             .put("courses", courses)
@@ -292,6 +323,17 @@ class ShiguangRepository(private val context: Context) {
                 raw["maintainer"].orEmpty(),
                 raw["description"].orEmpty()
             )
+        }
+    }
+
+    private fun detectGenericFamily(url: String): String? {
+        val lower = url.lowercase()
+        return when {
+            "chaoxing" in lower || "xueyinonline" in lower || "mooc1" in lower -> "chaoxing_jiaowu"
+            "qingguo" in lower -> "qingguo_jiaowu"
+            "urp" in lower -> "urp_jiaowu"
+            "jwglxt" in lower || "/xtgl/" in lower -> "zhengfang_jiaowu"
+            else -> null
         }
     }
 
@@ -471,6 +513,156 @@ class ShiguangRepository(private val context: Context) {
 
     companion object {
         private val GENERIC_FAMILIES = setOf("zhengfang_jiaowu", "qingguo_jiaowu", "urp_jiaowu", "chaoxing_jiaowu")
+
+        private val SMART_SCHEDULE_CAPTURE_SCRIPT = """
+(async () => {
+  const clean = (value) => String(value == null ? '' : value).replace(/\u00a0/g, ' ').replace(/[ \t]+/g, ' ').trim();
+  const cellText = (node) => clean(node && (node.innerText || node.textContent));
+  const weekdayOf = (raw) => {
+    const text = clean(raw);
+    const names = [['一',1],['二',2],['三',3],['四',4],['五',5],['六',6],['日',7],['天',7]];
+    for (const item of names) if (new RegExp('(星期|周)' + item[0]).test(text)) return item[1];
+    const match = text.match(/(?:星期|周)\s*([1-7])/);
+    return match ? Number(match[1]) : 0;
+  };
+  const sectionRange = (raw) => {
+    const text = clean(raw);
+    let match = text.match(/第?\s*(\d{1,2})\s*[-~—–至到]\s*(\d{1,2})\s*节?/);
+    if (match) return [Number(match[1]), Number(match[2])];
+    match = text.match(/第\s*(\d{1,2})\s*节/);
+    return match ? [Number(match[1]), Number(match[1])] : null;
+  };
+  const weeksOf = (raw) => {
+    const text = clean(raw);
+    const result = new Set();
+    const matches = text.matchAll(/(\d{1,2})\s*[-~—–至到]\s*(\d{1,2})\s*周/g);
+    for (const match of matches) {
+      const from = Math.max(1, Math.min(64, Number(match[1])));
+      const to = Math.max(1, Math.min(64, Number(match[2])));
+      for (let week = Math.min(from, to); week <= Math.max(from, to); week += 1) result.add(week);
+    }
+    if (!result.size) {
+      const singles = text.matchAll(/(?:第)?\s*(\d{1,2})\s*周/g);
+      for (const match of singles) result.add(Math.max(1, Math.min(64, Number(match[1]))));
+    }
+    const odd = /单周|单数周/.test(text);
+    const even = /双周|偶数周/.test(text);
+    if ((odd || even) && result.size) {
+      for (const week of Array.from(result)) if ((odd && week % 2 === 0) || (even && week % 2 === 1)) result.delete(week);
+    }
+    return result.size ? Array.from(result).sort((a,b) => a-b) : Array.from({length:20}, (_,i) => i + 1);
+  };
+  const field = (raw, keys) => {
+    const text = String(raw || '');
+    for (const key of keys) {
+      const match = text.match(new RegExp(key + '\\s*[:：]?\\s*([^\\n；;]+)', 'i'));
+      if (match) return clean(match[1]);
+    }
+    return '';
+  };
+  const guessLocation = (lines) => lines.find((line) => /(教室|实验室|楼|校区|馆|室\b|区\b)/.test(line) && !/(周|节)/.test(line)) || '';
+  const guessTeacher = (lines) => field(lines.join('\n'), ['教师','老师','任课教师']) || '';
+  const guessName = (lines) => lines.find((line) => line && !/(第?\d+.*周|第?\d+.*节|教师|老师|教室|地点|星期|周[一二三四五六日天])/.test(line)) || '';
+  const records = [];
+  const seen = new Set();
+  const push = (record) => {
+    if (!record.name || !(record.day >= 1 && record.day <= 7) || !(record.startSection > 0)) return;
+    record.endSection = Math.max(record.startSection, record.endSection || record.startSection);
+    const key = [record.name, record.day, record.startSection, record.endSection, record.position || '', record.teacher || ''].join('|');
+    if (seen.has(key)) return;
+    seen.add(key);
+    records.push(record);
+  };
+  const findIndex = (headers, rules) => headers.findIndex((header) => rules.some((rule) => rule.test(header)));
+
+  for (const table of Array.from(document.querySelectorAll('table'))) {
+    const rows = Array.from(table.querySelectorAll('tr'));
+    for (let headerIndex = 0; headerIndex < Math.min(rows.length, 8); headerIndex += 1) {
+      const headers = Array.from(rows[headerIndex].querySelectorAll('th,td')).map(cellText);
+      const nameIndex = findIndex(headers, [/课程名称/i,/课程名/i,/科目/i]);
+      const dayIndex = findIndex(headers, [/星期/i,/周几/i,/上课日/i]);
+      const sectionIndex = findIndex(headers, [/节次/i,/上课节次/i,/时间段/i]);
+      if (nameIndex < 0 || dayIndex < 0 || sectionIndex < 0) continue;
+      const teacherIndex = findIndex(headers, [/教师/i,/老师/i]);
+      const roomIndex = findIndex(headers, [/教室/i,/地点/i,/上课地点/i]);
+      const weeksIndex = findIndex(headers, [/周次/i,/教学周/i,/上课周/i]);
+      for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex += 1) {
+        const cells = Array.from(rows[rowIndex].querySelectorAll('th,td')).map(cellText);
+        const range = sectionRange(cells[sectionIndex] || '');
+        const day = weekdayOf(cells[dayIndex] || '');
+        if (!range || !day) continue;
+        push({
+          name: clean(cells[nameIndex]),
+          teacher: teacherIndex >= 0 ? clean(cells[teacherIndex]) : '',
+          position: roomIndex >= 0 ? clean(cells[roomIndex]) : '',
+          day,
+          startSection: range[0],
+          endSection: range[1],
+          weeks: weeksOf(weeksIndex >= 0 ? cells[weeksIndex] : ''),
+          startTime: '', endTime: ''
+        });
+      }
+    }
+  }
+
+  if (!records.length) {
+    for (const table of Array.from(document.querySelectorAll('table'))) {
+      const rows = Array.from(table.querySelectorAll('tr'));
+      let headerIndex = -1;
+      let dayColumns = [];
+      for (let i = 0; i < Math.min(rows.length, 10); i += 1) {
+        const cells = Array.from(rows[i].querySelectorAll('th,td')).map(cellText);
+        const mapped = cells.map((value, index) => [index, weekdayOf(value)]).filter((item) => item[1]);
+        if (mapped.length >= 3) { headerIndex = i; dayColumns = mapped; break; }
+      }
+      if (headerIndex < 0) continue;
+      for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex += 1) {
+        const cells = Array.from(rows[rowIndex].querySelectorAll('th,td'));
+        const rowText = cells.map(cellText);
+        const rowRange = sectionRange(rowText.slice(0, 2).join(' '));
+        for (const pair of dayColumns) {
+          const column = pair[0]; const day = pair[1];
+          const raw = cellText(cells[column]);
+          if (!raw || raw.length < 2) continue;
+          const range = sectionRange(raw) || rowRange;
+          if (!range) continue;
+          const lines = raw.split(/\n+/).map(clean).filter(Boolean);
+          const name = guessName(lines);
+          if (!name) continue;
+          push({
+            name,
+            teacher: guessTeacher(lines),
+            position: field(raw, ['教室','地点','上课地点']) || guessLocation(lines),
+            day,
+            startSection: range[0],
+            endSection: range[1],
+            weeks: weeksOf(raw),
+            startTime: '', endTime: ''
+          });
+        }
+      }
+    }
+  }
+
+  if (!records.length) {
+    await window.shiguangBridgePromise.showAlert(
+      '暂时没有识别到课表',
+      '请先进入教务系统的个人课表/我的课表页面并完成查询，再重新点击「尝试抓取课表」。如果仍然失败，可返回 LumaSchedule 在高级选项中手动选择教务系统类型。',
+      '知道了'
+    );
+    return;
+  }
+
+  const bodyText = clean(document.body && document.body.innerText);
+  const termMatch = bodyText.match(/20\d{2}\s*[-—–~至]\s*20?\d{2}\s*学年.{0,12}(?:第一|第二|第1|第2|春|秋).{0,4}学期/);
+  if (termMatch) {
+    await window.shiguangBridgePromise.saveCourseConfig(JSON.stringify({ semesterName: clean(termMatch[0]), semesterStartDate: '' }));
+  }
+  await window.shiguangBridgePromise.saveImportedCourses(JSON.stringify(records));
+  window.shiguangBridge.showToast('智能兼容识别到 ' + records.length + ' 个课程时段。');
+  window.shiguangBridge.notifyTaskCompletion();
+})();
+""".trimIndent()
 
         private val GRADE_CAPTURE_SCRIPT = """
 window.__LUMA_CAPTURE_GRADES__ = async function () {
