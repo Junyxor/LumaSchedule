@@ -20,6 +20,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.lumaschedule.app.data.LumaDatabase
+import com.lumaschedule.app.data.WeekScheduleBridge
 import java.io.ByteArrayInputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -29,6 +30,7 @@ class MainActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var database: LumaDatabase
     private lateinit var bridge: LumaBridge
+    private var weekBridge: WeekScheduleBridge? = null
     private val ioExecutor = Executors.newFixedThreadPool(2) { runnable ->
         Thread(runnable, "luma-native-io").apply { priority = Thread.NORM_PRIORITY }
     }
@@ -44,10 +46,12 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         configureWindow(window)
         database = LumaDatabase(this)
+        weekBridge = runCatching { WeekScheduleBridge(this) }.getOrNull()
         webView = WebView(this)
         configureWebView(webView)
         bridge = LumaBridge(this, webView, database, ioExecutor, launchStarted)
         webView.addJavascriptInterface(bridge, "LumaNative")
+        weekBridge?.let { webView.addJavascriptInterface(it, "LumaWeek") }
         setContentView(webView)
         webView.loadUrl(APP_URL)
     }
@@ -279,9 +283,12 @@ class MainActivity : Activity() {
         webFileChooserCallback = null
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface("LumaNative")
+            webView.removeJavascriptInterface("LumaWeek")
             webView.stopLoading()
             webView.destroy()
         }
+        weekBridge?.close()
+        weekBridge = null
         if (::database.isInitialized) database.close()
         ioExecutor.shutdownNow()
         super.onDestroy()

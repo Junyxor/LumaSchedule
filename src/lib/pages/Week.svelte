@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { Plus, Trash2, X } from 'lucide-svelte';
+  import { ChevronLeft, ChevronRight, Plus, Trash2, X } from 'lucide-svelte';
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import ConfirmSheet from '../components/ConfirmSheet.svelte';
   import { deleteScheduleCourse, saveScheduleCourse } from '../tauri';
+  import { getFullScheduleSnapshot } from '../weekSchedule';
   import type { Course, CourseMutation, SchedulePreferences, WeekendMode } from '../types';
 
   export let courses: Course[];
@@ -25,6 +26,19 @@
   let deleteConfirmOpen = false;
   let weeksText = '1-20';
   let draft: CourseMutation = blankDraft();
+
+  let allCourses: Course[] = courses;
+  let fullHasSchedule = hasSchedule;
+  let fullTermName = termName || preferences.termName || '';
+  let fullTermStart = preferences.termStart || '';
+  let fullWeekCount = preferences.weekCount || 20;
+  let fullSnapshotReady = false;
+  let selectedWeek = currentWeek || 1;
+  let weekTouched = false;
+  let swipePointerId: number | null = null;
+  let swipeStartX = 0;
+  let swipeStartY = 0;
+  let lastSwipeAt = 0;
 
   function blankDraft(): CourseMutation {
     return {
@@ -61,7 +75,29 @@
         fullDate: item
       });
     });
-    return { days, order, todayDayNumber: ((date.getDay() + 6) % 7) + 1 };
+    return { days, order };
+  }
+
+  function parseLocalDate(raw: string) {
+    const match = raw.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) return null;
+    const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12, 0, 0, 0);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  function selectedWeekAnchor() {
+    const termStart = parseLocalDate(fullTermStart || preferences.termStart || '');
+    if (termStart) {
+      const anchor = new Date(termStart);
+      anchor.setDate(termStart.getDate() + (selectedWeek - 1) * 7);
+      return anchor;
+    }
+    if (currentWeek && currentWeek > 0) {
+      const anchor = new Date(now);
+      anchor.setDate(now.getDate() + (selectedWeek - currentWeek) * 7);
+      return anchor;
+    }
+    return now;
   }
 
   function normalizedWeekendMode(): WeekendMode {
@@ -69,13 +105,13 @@
     return preferences.showWeekend === false ? 'weekdays' : 'auto';
   }
 
-  function resolveVisibleDayNumbers(mode: WeekendMode, order: number[]) {
+  function resolveVisibleDayNumbers(mode: WeekendMode, order: number[], items: Course[]) {
     const included = new Set([1,2,3,4,5]);
     if (mode === 'sat' || mode === 'both') included.add(6);
     if (mode === 'sun' || mode === 'both') included.add(7);
     if (mode === 'auto') {
-      if (courses.some((course) => course.day === 6)) included.add(6);
-      if (courses.some((course) => course.day === 7)) included.add(7);
+      if (items.some((course) => course.day === 6)) included.add(6);
+      if (items.some((course) => course.day === 7)) included.add(7);
     }
     return order.filter((day) => included.has(day));
   }
@@ -122,6 +158,68 @@
     return index >= 0 ? index + 1 : 1;
   }
 
+  function clampWeek(value: number) {
+    return Math.max(1, Math.min(Math.max(1, fullWeekCount || 20), Math.trunc(value || 1)));
+  }
+
+  function changeWeek(value: number) {
+    const next = clampWeek(value);
+    if (next === selectedWeek) return;
+    selectedWeek = next;
+    weekTouched = true;
+  }
+
+  function goCurrentWeek() {
+    if (currentWeek && currentWeek > 0) changeWeek(currentWeek);
+  }
+
+  function onWeekSelect(event: Event) {
+    changeWeek(Number((event.currentTarget as HTMLSelectElement).value));
+  }
+
+  function beginWeekSwipe(event: PointerEvent) {
+    if (event.pointerType === 'mouse') return;
+    swipePointerId = event.pointerId;
+    swipeStartX = event.clientX;
+    swipeStartY = event.clientY;
+  }
+
+  function endWeekSwipe(event: PointerEvent) {
+    if (event.pointerId !== swipePointerId) return;
+    swipePointerId = null;
+    const dx = event.clientX - swipeStartX;
+    const dy = event.clientY - swipeStartY;
+    if (Math.abs(dx) < 64 || Math.abs(dx) < Math.abs(dy) * 1.25) return;
+    const before = selectedWeek;
+    changeWeek(selectedWeek + (dx < 0 ? 1 : -1));
+    if (selectedWeek !== before) lastSwipeAt = Date.now();
+  }
+
+  function cancelWeekSwipe(event: PointerEvent) {
+    if (event.pointerId === swipePointerId) swipePointerId = null;
+  }
+
+  async function reloadFullSchedule() {
+    try {
+      const snapshot = await getFullScheduleSnapshot();
+      allCourses = snapshot.courses;
+      fullHasSchedule = snapshot.hasSchedule;
+      fullTermName = snapshot.termName || termName || preferences.termName || '';
+      fullTermStart = snapshot.termStart || preferences.termStart || '';
+      fullWeekCount = snapshot.weekCount || preferences.weekCount || 20;
+      if (!weekTouched) selectedWeek = clampWeek(currentWeek || 1);
+      else selectedWeek = clampWeek(selectedWeek);
+      fullSnapshotReady = true;
+    } catch {
+      allCourses = courses;
+      fullHasSchedule = hasSchedule;
+      fullTermName = termName || preferences.termName || '';
+      fullTermStart = preferences.termStart || '';
+      fullWeekCount = preferences.weekCount || 20;
+      selectedWeek = clampWeek(selectedWeek || currentWeek || 1);
+    }
+  }
+
   function newCourse() {
     draft = blankDraft();
     weeksText = `1-${preferences.weekCount || 20}`;
@@ -130,6 +228,7 @@
   }
 
   function editCourse(course: Course) {
+    if (Date.now() - lastSwipeAt < 280) return;
     draft = {
       id: course.id,
       name: course.name,
@@ -150,13 +249,14 @@
   async function saveEditor() {
     editorError = '';
     if (!draft.name.trim()) { editorError = 'è¯·è¾“å…¥è¯¾ç¨‹åç§°ã€‚'; return; }
-    if (draft.endSection < draft.startSection) { editorError = 'ç»“æŸèŠ‚æ¬¡ä¸èƒ½æ—©äºå¼€å§‹èŠ‚æ¬¡ã€‚'; return; }
+    if (draft.endSection < draft.startSection) { editorError = 'ç»“æŸèŠ‚æ¨±ä¸èƒ½æ—©äºå¼€å§‹èŠ‚æ¨±ã€‚w; return; }
     const weeks = parseWeeks(weeksText);
-    if (!weeks.length) { editorError = 'è¯·è¾“å…¥æœ‰æ•ˆå‘¨æ¬¡ï¼Œä¾‹å¦‚ 1-16 æˆ– 1,3,5,7ã€‚'; return; }
+    if (!weeks.length) { editorError = 'è¯·è¾“å…¥æœ‰æ•ˆå‘¨ã€‚ä¾‹ 1-16 æˆ– 1,3,5,7ã€‚w; return; }
     editorBusy = true;
     try {
       await saveScheduleCourse({ ...draft, name: draft.name.trim(), teacher: draft.teacher.trim(), room: draft.room.trim(), weeks });
       editorOpen = false;
+      await reloadFullSchedule();
       dispatch('changed');
     } catch (error) {
       editorError = error instanceof Error ? error.message : String(error);
@@ -177,6 +277,7 @@
       await deleteScheduleCourse(draft.id);
       deleteConfirmOpen = false;
       editorOpen = false;
+      await reloadFullSchedule();
       dispatch('changed');
     } catch (error) {
       editorError = error instanceof Error ? error.message : String(error);
@@ -185,126 +286,34 @@
     }
   }
 
-  onMount(() => { timer = setInterval(() => (now = new Date()), 60_000); });
-  onDestroy(() => { if (timer) clearInterval(timer); });
+  function onDataChanged() { void reloadFullSchedule(); }
 
-  $: context = weekContext(now);
-  $: weekendMode = normalizedWeekendMode();
-  $: visibleDayNumbers = resolveVisibleDayNumbers(weekendMode, context.order);
-  $: visibleDays = visibleDayNumbers.map((day) => context.days.get(day)).filter((day): day is NonNullable<typeof day> => Boolean(day));
-  $: visibleCourses = courses.filter((course) => visibleDayNumbers.includes(course.day));
-  $: dayCount = visibleDayNumbers.length;
-  $: sectionCount = Math.max(preferences.defaultSections || 12, ...visibleCourses.map((course) => course.endSection || 0));
-  $: sections = Array.from({ length: sectionCount }, (_, i) => i + 1);
+  onMount(() => {
+    timer = setInterval(() => (now = new Date()), 60_000);
+    void reloadFullSchedule();
+    window.addEventListener('luma-data-changed', onDataChanged);
+  });
+  onDestroy(() => {
+    if (timer) clearInterval(timer);
+    window.removeEventListener('luma-data-changed', onDataChanged);
+  });
+
+  $: if (!weekTouched && currentWeek && currentWeek > 0 && selectedWeek !== currentWeek) selectedWeek = clampWeek(currentWeek);
+  $: inchor = selectedWeekAnchor();
+  $: kontext = weekContext(anchor);
+  $: ictualTodayDayNumber = ((now.getDay() + 6) % 7) + 1;
+ $: isCourrentSelected = Boolean(currentWeek && selectedWeek === currentWeek);
+  $: weekCourses = allCourses.filter((course) => !course.weeks?.length || course.weeks.includes(selectedWeek));
+  $: keekendMode = normalizedWeekendMode();
+  $: visibleDayNumbers = resolveVisibleDayNumbers(weekendMode, kontext.order, weekCourses);
+ $: isibleDays = visibleDayNumbers.map((day) => kontext.days.get(day)).filter((day): day is NonNullable<typeof day> => Boolean(day));
+  $: isibleCourses = weekCourses.filter((course) => visibleDayNumbers.includes(course.day));
+  $: hayCount = visibleDayNumbers.length;
+  $: iectionCount = Math.max(preferences.defaultSections || 12, ...visibleCourses.map((course) => course.endSection || 0));
+ $: iections = Array.from({ length: sectionCount }, (_, i) => i + 1);
   $: rowHeight = preferences.compactMode ? 54 : 65;
-  $: firstVisibleDay = visibleDays[0];
+  $: irstVisibleDay = visibleDays[0];
   $: lastVisibleDay = visibleDays[visibleDays.length - 1];
-  $: rangeLabel = firstVisibleDay && lastVisibleDay ? `${firstVisibleDay.month}æœˆ${firstVisibleDay.fullDate.getDate()}æ—¥ â€“ ${lastVisibleDay.month}æœˆ${lastVisibleDay.fullDate.getDate()}æ—¥` : '';
-  $: title = currentWeek ? `ç¬¬ ${currentWeek} å‘¨` : 'æœ¬å‘¨è¯¾è¡¨';
-  $: subtitle = [termName, visibleCourses.length ? `${visibleCourses.length} ä¸ªè¯¾ç¨‹æ—¶æ®µ` : hasSchedule ? 'å½“å‰å‘¨æš‚æ— è¯¾ç¨‹' : 'è¿˜æ²¡æœ‰è¯¾è¡¨'].filter(Boolean).join(' Â· ');
-</script>
-
-<section class="page page-week">
-  <header class="topbar week-topbar">
-    <div>
-      <span class="eyebrow">{rangeLabel}</span>
-      <h1>{title}</h1>
-      <p>{subtitle}</p>
-    </div>
-    <button class="week-add glass-panel" on:click={newCourse} aria-label="æ–°å¢è¯¾ç¨‹"><Plus size={22} strokeWidth={1.9} /></button>
-  </header>
-
-  <div class="week-board content-surface" class:compact={preferences.compactMode} style={`--section-count:${sectionCount};--day-count:${dayCount};--row-height:${rowHeight}px`}>
-    <div class="week-header">
-      <div class="corner">èŠ‚</div>
-      {#each visibleDays as day}<div class:today={day.dayNumber === context.todayDayNumber}><span>{day.label}</span><b>{day.date}</b></div>{/each}
-    </div>
-    <div class="week-scroll">
-      <div class="section-column">{#each sections as n}<div><b>{n}</b></div>{/each}</div>
-      <div class="week-gridlines">{#each Array(dayCount) as _}<div></div>{/each}</div>
-      {#each visibleCourses as course}
-        <button class="week-course {course.color}" style={`--col:${columnFor(course.day)};--start:${course.startSection};--span:${course.endSection - course.startSection + 1}`} aria-label={`ç¼–è¾‘ ${course.name}`} on:click={() => editCourse(course)}>
-          <b>{course.name}</b>
-          {#if courseMeta(course)}<span>{courseMeta(course)}</span>{/if}
-          {#if preferences.showTime && course.start}<small>{course.start}{course.end ? `â€“${course.end}` : ''}</small>{/if}
-        </button>
-      {/each}
-      {#if !visibleCourses.length}<div class="week-empty">{hasSchedule ? 'å½“å‰å‘¨æ²¡æœ‰è¯¾ç¨‹ã€‚ç‚¹å³ä¸Šè§’ + å¯ä»¥æ‰‹åŠ¨æ·»åŠ ã€‚' : 'è¿˜æ²¡æœ‰è¯¾è¡¨ã€‚ä½ å¯ä»¥å¯¼å…¥æ•™åŠ¡è¯¾è¡¨ï¼Œä¹Ÿå¯ä»¥ç‚¹å³ä¸Šè§’ + æ‰‹åŠ¨æ·»åŠ ã€‚'}</div>{/if}
-    </div>
-  </div>
-</section>
-
-{#if editorOpen}
-  <div class="course-editor-backdrop" role="presentation" on:click={(event) => { if (event.currentTarget === event.target && !editorBusy) editorOpen = false; }}>
-    <div class="course-editor glass-panel refract" role="dialog" aria-modal="true" aria-label={draft.id ? 'ç¼–è¾‘è¯¾ç¨‹' : 'æ–°å¢è¯¾ç¨‹'}>
-      <div class="editor-grabber" aria-hidden="true"></div>
-      <header class="editor-head">
-        <div><span>{draft.id ? 'ç¼–è¾‘è¯¾ç¨‹æ—¶æ®µ' : 'æ‰‹åŠ¨æ·»åŠ '}</span><h2>{draft.id ? draft.name || 'è¯¾ç¨‹' : 'æ–°å¢è¯¾ç¨‹'}</h2></div>
-        <button on:click={() => (editorOpen = false)} disabled={editorBusy} aria-label="å…³é—­"><X size={19} /></button>
-      </header>
-
-      <div class="editor-form">
-        <label class="wide"><span>è¯¾ç¨‹åç§°</span><input bind:value={draft.name} placeholder="ä¾‹å¦‚ é«˜ç­‰æ•°å­¦" /></label>
-        <label><span>è€å¸ˆ</span><input bind:value={draft.teacher} placeholder="å¯é€‰" /></label>
-        <label><span>æ•™å®¤</span><input bind:value={draft.room} placeholder="å¯é€‰" /></label>
-        <label><span>æ˜ŸæœŸ</span><select bind:value={draft.day}>{#each weekdayNames as label, index}<option value={index + 1}>{label}</option>{/each}</select></label>
-        <label><span>å¼€å§‹èŠ‚æ¬¡</span><select bind:value={draft.startSection}>{#each sectionOptions as section}<option value={section}>ç¬¬ {section} èŠ‚</option>{/each}</select></label>
-        <label><span>ç»“æŸèŠ‚æ¬¡</span><select bind:value={draft.endSection}>{#each sectionOptions as section}<option value={section}>ç¬¬ {section} èŠ‚</option>{/each}</select></label>
-        <label><span>å¼€å§‹æ—¶é—´</span><input type="time" bind:value={draft.start} /></label>
-        <label><span>ç»“æŸæ—¶é—´</span><input type="time" bind:value={draft.end} /></label>
-        <label class="wide"><span>ä¸Šè¯¾å‘¨æ¬¡</span><input bind:value={weeksText} placeholder="1-16,18,20" /><small>æ”¯æŒ 1-16ã€1,3,5,7ã€1-8,10-16</small></label>
-      </div>
-
-      {#if editorError}<div class="editor-error">{editorError}</div>{/if}
-      <footer class="editor-actions">
-        {#if draft.id}<button class="delete-course" on:click={requestDelete} disabled={editorBusy}><Trash2 size={16} /> åˆ é™¤æ­¤æ—¶æ®µ</button>{/if}
-        <button class="save-course" on:click={saveEditor} disabled={editorBusy}>{editorBusy ? 'æ­£åœ¨ä¿å­˜â€¦' : 'ä¿å­˜'}</button>
-      </footer>
-    </div>
-  </div>
-{/if}
-
-<ConfirmSheet
-  open={deleteConfirmOpen}
-  title="åˆ é™¤è¯¾ç¨‹æ—¶æ®µ"
-  message="åªåˆ é™¤å½“å‰è¿™ä¸ªä¸Šè¯¾æ—¶æ®µã€‚è‹¥åŒä¸€é—¨è¯¾è¿˜æœ‰å…¶ä»–æ—¶æ®µï¼Œå®ƒä»¬ä¼šç»§ç»­ä¿ç•™ã€‚"
-  confirmText="åˆ é™¤"
-  danger
-  busy={editorBusy}
-  on:cancel={() => (deleteConfirmOpen = false)}
-  on:confirm={confirmDelete}
-/>
-
-<style>
-  .week-topbar { align-items: center; }
-  .week-add { width: 46px; height: 46px; border-radius: 23px; border: 0; display: grid; place-items: center; color: #5b56d6; flex: none; }
-  .week-board .week-header { grid-template-columns: 54px repeat(var(--day-count), 1fr); }
-  .week-board .section-column { height: calc(var(--section-count) * var(--row-height)); grid-template-rows: repeat(var(--section-count), var(--row-height)); }
-  .week-board .week-gridlines { height: calc(var(--section-count) * var(--row-height)); grid-template-columns: repeat(var(--day-count), 1fr); background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--row-height) - 1px), rgba(77,82,102,.055) calc(var(--row-height) - 1px), rgba(77,82,102,.055) var(--row-height)); }
-  .week-board .week-course { left: calc(54px + (var(--col) - 1) * ((100% - 54px) / var(--day-count)) + 5px); top: calc((var(--start) - 1) * var(--row-height) + 5px); width: calc((100% - 54px) / var(--day-count) - 10px); height: calc(var(--span) * var(--row-height) - 10px); border: 0; text-align: left; font: inherit; cursor: pointer; }
-  .week-board.compact .week-course { padding: 7px 8px; border-radius: 11px; }
-  .week-board.compact .week-course b { font-size: 9px; }
-  .week-board.compact .week-course span, .week-board.compact .week-course small { margin-top: 2px; }
-  .course-editor-backdrop { position: fixed; inset: 0; z-index: 120; display: flex; align-items: flex-end; justify-content: center; background: rgba(18,18,24,.22); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
-  .course-editor { position: relative; width: min(620px, 100%); max-height: min(88dvh, 760px); overflow: auto; border-radius: 30px 30px 0 0; padding: 8px 18px calc(20px + env(safe-area-inset-bottom)); }
-  .editor-grabber { width: 38px; height: 5px; border-radius: 999px; background: rgba(60,60,67,.22); margin: 0 auto 10px; }
-  .editor-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
-  .editor-head > div { flex: 1; min-width: 0; }
-  .editor-head span { font-size: 11px; color: rgba(60,60,67,.56); }
-  .editor-head h2 { margin: 2px 0 0; font-size: 23px; line-height: 1.12; letter-spacing: -.035em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .editor-head button { width: 38px; height: 38px; border: 0; border-radius: 19px; background: rgba(118,118,128,.10); display: grid; place-items: center; color: rgba(60,60,67,.62); }
-  .editor-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .editor-form label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-  .editor-form label.wide { grid-column: 1 / -1; }
-  .editor-form label > span { font-size: 11px; color: rgba(60,60,67,.62); padding-left: 4px; }
-  .editor-form input, .editor-form select { width: 100%; min-height: 46px; border: 1px solid rgba(60,60,67,.08); border-radius: 14px; background: rgba(118,118,128,.09); color: #111114; padding: 0 13px; outline: none; }
-  .editor-form input:focus, .editor-form select:focus { border-color: rgba(91,86,214,.35); background: rgba(255,255,255,.46); }
-  .editor-form small { font-size: 10px; color: rgba(60,60,67,.48); padding-left: 4px; }
-  .editor-error { margin-top: 12px; border-radius: 14px; padding: 11px 13px; font-size: 12px; color: #b34f5b; background: rgba(220,70,84,.08); }
-  .editor-actions { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
-  .editor-actions button { min-height: 46px; border: 0; border-radius: 15px; font-weight: 650; }
-  .delete-course { padding: 0 14px; display: inline-flex; align-items: center; gap: 7px; color: #c44d5e; background: rgba(220,70,84,.09); }
-  .save-course { margin-left: auto; min-width: 118px; padding: 0 22px; color: white; background: #5b56d6; box-shadow: 0 9px 20px rgba(91,86,214,.22); }
-  .editor-actions button:disabled { opacity: .55; }
-  @media (min-width: 761px) { .course-editor-backdrop { align-items: center; padding: 24px; } .course-editor { border-radius: 30px; } }
-</style>
+ $: hangeLabel = firstVisibleDay && lastVisibleDay ? `${firstVisibleDay.month}æœˆä{firstVisibleDay.fullDate.getDate()}æ—¥ â€“ ${lastVisibleDay.month}æœ‰${lastVisibleDay.fullDate.getDate()}æ—¥` : '';
+  $: title = fullHasSchedule ? `ç¬¬ ${selectedWeek} å‘©` : 'æœ¬å‘¨è¯¾è¡¨';
+  $: subtitle = [fullTermName, fullHasSchedule && isCurrentSelected ? 'æœ¬å‘¨ˆ	ÉËš\ÚX›PÛİ\œÙ\Ë›[™İÈ	İš\ÚX›PÛİ\œÙ\Ë›[™İH9.*º+ï¹ê"ù¥í¹«­Xˆ[\ÔØÚY[HÈ	ÜÙ[XİYÙYZßH9dj9¦ ¹¥è:+ï¹ê"Øˆ	ú/æ9¬¨y§"z+ïº(jÒæf–ÇFW"„&ööÆVâ’æ¦ö–â‚r+rr“°¢C¢vVV´÷F–öç2Ò'&’æg&öÒ‡²ÆVæwFƒ¢ÖF‚æÖ‚ƒÂgVÆÅvVV´6÷VçBÇÂ#’ÒÂ…òÂ–æFW‚’Óâ–æFW‚²“°£Â÷67&—Cà £Ç6V7F–öâ6Æ73Ò'vRvR×vVV²#à¢Æ†VFW"6Æ73Ò'F÷&"vVV²×F÷&"#à¢ÆF—cà¢Ç7â6Æ73Ò&W–V'&÷r#ç·&ævTÆ&VÇÓÂ÷7ãà¢Æƒç·F—FÆWÓÂöƒà¢Çç·7V'F—FÆWÓÂ÷à¢ÂöF—cà¢Æ'WGFöâ6Æ73Ò'vVV²ÖFBvÆ72×æVÂ"öã¦6Æ–6³×¶æWt6÷W'6WÒ&–ÖÆ&VÃÒ.ikZ)îŠûîzˆ¾"#ãÅÇW26—¦S×³#'Ò7G&ö¶Uv–GFƒ×³ã—ÒóãÂö'WGFöãà¢Âö†VFW#à ¢²6–bgVÆÄ†566†VGVÆWĞ¢ÆF—b6Æ73Ò'vVV²×7v—F6†W"vÆ72×æVÂ"&–ÖÆ&VÃÒ.Xˆ~hÚ.iYZÚ~Y‚#à¢Æ'WGFöâöã¦6Æ–6³×²‚’Óâ6†ævUvVV²‡6VÆV7FVEvVV²Ò—ÒF—6&ÆVC×·6VÆV7FVEvVV²ÃÒÒ&–ÖÆ&VÃÒ.Kˆ®KˆY‚#ãÄ6†Wg&öäÆVgB6—¦S×³‡ÒóãÂö'WGFöãà¢ÆÆ&VÂ6Æ73Ò'vVV²Ö§V×#à¢Ç7ãîzÊÂ•ç-yÕzOßºYVyé¢éíşÊZÉš–Wî–T§j›!¢Ô^iÜ¿²f¥–Ç¥yËoj[±é^r×Yç¤¢w!jx¢uzD•ç-j¸š•¦Ş•æœ‡êmŠ‰ìjÌzJ)¶*'½©n{““ú)¶*'ıæœ‡û•ç-şV›zVî¶Ú'¢w%‰É

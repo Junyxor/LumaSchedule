@@ -16,5 +16,7 @@ jobs:
       - run: npm install
       - run: node --check scripts/sync-shiguang-adapters.mjs
       - run: node --check scripts/validate-shiguang-contract.mjs
+      - run: node --check scripts/convert-wakeup-school-info.mjs
+      - run: node scripts/test-wakeup-school-info.mjs
       - run: npm run build
       - run: npm run check
