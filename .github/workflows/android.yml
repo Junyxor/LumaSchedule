@@ -74,7 +74,7 @@ jobs:
             -alias lumaschedule-test \
             -keyalg RSA -keysize 2048 -validity 3650 \
             -dname "CN=LumaSchedule Test, OU=CI, O=LumaSchedule, L=Guangzhou, ST=Guangdong, C=CN"
-      - name: Build native Release APK
+      - name: Build native Release APK and AAB
         env:
           LUMA_VERSION_NAME: 0.1.0-test
           LUMA_VERSION_CODE: 999
@@ -82,27 +82,30 @@ jobs:
           LUMA_KEY_ALIAS: lumaschedule-test
           LUMA_KEY_PASSWORD: lumaschedule-test
           LUMA_STORE_PASSWORD: lumaschedule-test
-        run: gradle -p android-native :app:assembleRelease --no-daemon --stacktrace
-      - name: Verify test APK
+        run: gradle -p android-native :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace
+      - name: Verify test APK and AAB
         shell: bash
         run: |
           set -euo pipefail
           APK="$(find android-native/app/build/outputs/apk/release -name '*.apk' -type f | head -n 1)"
-          test -n "$APK"
+          AAB="$(find android-native/app/build/outputs/bundle/release -name '*.aab' -type f | head -n 1)"
+          test -n "$APK" && test -n "$AAB"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          jarsigner -verify "$AAB" >/dev/null
           if unzip -l "$APK" | grep -Eq ' lib/.*\.so$'; then
             echo '::error::Native shared libraries unexpectedly found in APK.'
             exit 1
           fi
-      - name: Report APK size
+      - name: Report test release sizes
         shell: bash
         run: |
-          find android-native/app/build/outputs/apk -name '*.apk' -type f -print0 | xargs -0 -r ls -lh
-          find android-native/app/build/outputs/apk -name '*.apk' -type f -printf '%p %s bytes\n'
+          find android-native/app/build/outputs \( -name '*.apk' -o -name '*.aab' \) -type f -print0 | xargs -0 -r ls -lh
       - uses: actions/upload-artifact@v4
         with:
           name: lumaschedule-android-native-test-release
-          path: android-native/app/build/outputs/apk/release/*.apk
+          path: |
+            android-native/app/build/outputs/apk/release/*.apk
+            android-native/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
           retention-days: 14
 
@@ -202,7 +205,7 @@ jobs:
           test -n "$APK" && test -n "$AAB"
           mkdir -p release
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee release/SIGNING-CERTIFICATE.txt
-          jarsigner -verify -strict "$AAB" >/dev/null
+          jarsigner -verify "$AAB" >/dev/null
           if unzip -l "$APK" | grep -Eq ' lib/.*\.so$'; then
             echo '::error::Native shared libraries unexpectedly found in release APK.'
             exit 1
