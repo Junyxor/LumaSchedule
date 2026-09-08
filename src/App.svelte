@@ -20,7 +20,7 @@
     weekCount: 20,
     timezone: 'Asia/Shanghai',
     weekStartsOn: 1,
-    showWeekend: true,
+    weekendMode: 'auto',
     showTeacher: true,
     showRoom: true,
     showTime: true,
@@ -97,7 +97,7 @@
       const localGlass = readLocalGlass();
       glass = localGlass ?? (bootstrap.glassSettings ? { ...defaultGlass, ...bootstrap.glassSettings } : { ...defaultGlass });
       scheduleSnapshot = snapshot;
-      schedulePreferences = preferences;
+      schedulePreferences = { ...schedulePreferences, ...preferences };
       runtimeCourses = snapshot.courses;
       liveData = bootstrap.dbReady;
     } catch {
