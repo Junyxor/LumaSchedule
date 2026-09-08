@@ -14,19 +14,9 @@ jobs:
         with:
           node-version: 22
       - run: npm install
-      - run: node --check scripts/prepare-android-ci.mjs
+      - run: node --check scripts/sync-shiguang-adapters.mjs
+      - run: node --check scripts/validate-shiguang-contract.mjs
+      - run: node --check scripts/convert-wakeup-school-info.mjs
+      - run: node scripts/test-wakeup-school-info.mjs
       - run: npm run build
       - run: npm run check
-
-  rust-core:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Tauri Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
-      - run: cargo test -p schedule-core -p schedule-import -p schedule-adapter
-      - run: cargo check -p lumaschedule

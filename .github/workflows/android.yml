@@ -1,4 +1,4 @@
-name: Android
+name: Android Native
 
 on:
   push:
@@ -12,6 +12,14 @@ on:
         required: false
         type: boolean
         default: false
+      version:
+        description: 'Version for a manual signed build, e.g. 0.1.0'
+        required: false
+        type: string
+        default: '0.1.0'
+
+permissions:
+  contents: read
 
 jobs:
   test-release-apk:
@@ -34,35 +42,31 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-      - name: Android SDK / NDK
-        run: yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
-      - name: Export NDK_HOME
-        run: echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
+      - run: yes | sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          targets: aarch64-linux-android
-      - uses: Swatinem/rust-cache@v2
+          gradle-version: '8.9'
       - run: npm install
+      - name: Validate Android SQLite API usage
+        run: node scripts/validate-android-sqlite-usage.mjs
+      - name: Smoke test WakeUp profile converter
+        run: node scripts/test-wakeup-school-info.mjs
       - name: Bundle current university adapters
         env:
           SHIGUANG_SOURCE: .upstream/shiguang_warehouse
         run: node scripts/sync-shiguang-adapters.mjs
-      - run: npx tauri android init --ci --skip-targets-install
-      - run: npx tauri icon assets/app-icon.svg
-      - name: Restore optional Firebase Android config
-        env:
-          FIREBASE_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}
-        shell: bash
-        run: |
-          if [ -z "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" ]; then
-            echo "Firebase Android config not configured; continuing without google-services.json."
-            exit 0
-          fi
-          printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > src-tauri/gen/android/app/google-services.json
-          test -s src-tauri/gen/android/app/google-services.json || (echo "::error::Decoded google-services.json is empty" && exit 1)
+      - name: Validate bundled adapter contract
+        run: node scripts/validate-shiguang-contract.mjs
+      - name: Smoke test GDUT adapter
+        run: node scripts/test-gdut-adapter.mjs
+      - name: Check frontend
+        run: npm run check
+      - name: Build Svelte assets
+        run: npm run build
       - name: Create ephemeral test signing key
         shell: bash
         run: |
+          set -euo pipefail
           keytool -genkeypair -v \
             -keystore "$RUNNER_TEMP/lumaschedule-test.jks" \
             -storepass lumaschedule-test \
@@ -70,32 +74,63 @@ jobs:
             -alias lumaschedule-test \
             -keyalg RSA -keysize 2048 -validity 3650 \
             -dname "CN=LumaSchedule Test, OU=CI, O=LumaSchedule, L=Guangzhou, ST=Guangdong, C=CN"
-          cat > src-tauri/gen/android/keystore.properties <<EOF2
-          keyAlias=lumaschedule-test
-          keyPassword=lumaschedule-test
-          storePassword=lumaschedule-test
-          storeFile=$RUNNER_TEMP/lumaschedule-test.jks
-          EOF2
-      - run: node scripts/prepare-android-ci.mjs --signing --shrink
-      - name: Build compact arm64 test Release APK
-        run: npx tauri android build --apk --target aarch64 --ci
+      - name: Build native Release APK
+        env:
+          LUMA_VERSION_NAME: 0.1.0-test
+          LUMA_VERSION_CODE: 999
+          LUMA_KEYSTORE_PATH: ${{ runner.temp }}/lumaschedule-test.jks
+          LUMA_KEY_ALIAS: lumaschedule-test
+          LUMA_KEY_PASSWORD: lumaschedule-test
+          LUMA_STORE_PASSWORD: lumaschedule-test
+        run: gradle -p android-native :app:assembleRelease --no-daemon --stacktrace
+      - name: Verify test APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$(find android-native/app/build/outputs/apk/release -name '*.apk' -type f | head -n 1)"
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          if unzip -l "$APK" | grep -Eq ' lib/.*\.so$'; then
+            echo '::error::Native shared libraries unexpectedly found in APK.'
+            exit 1
+          fi
       - name: Report APK size
         shell: bash
         run: |
-          echo "Compact test APK(s):"
-          find src-tauri/gen/android/app/build/outputs -name '*.apk' -type f -print0 | xargs -0 -r ls -lh
-          find src-tauri/gen/android/app/build/outputs -name '*.apk' -type f -printf '%p %s bytes\n'
+          find android-native/app/build/outputs/apk -name '*.apk' -type f -print0 | xargs -0 -r ls -lh
+          find android-native/app/build/outputs/apk -name '*.apk' -type f -printf '%p %s bytes\n'
       - uses: actions/upload-artifact@v4
         with:
-          name: lumaschedule-android-arm64-test-release
-          path: src-tauri/gen/android/app/build/outputs/**/*.apk
+          name: lumaschedule-android-native-test-release
+          path: android-native/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+          retention-days: 14
 
   signed-release:
     if: ${{ startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.release) }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
+      - name: Resolve release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            TAG="$GITHUB_REF_NAME"
+            [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Release tag must look like v0.1.0"; exit 1; }
+            VERSION="${TAG#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+            [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Manual release version must look like 0.1.0"; exit 1; }
+          fi
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          CODE=$((10#$MAJOR * 1000000 + 10#$MINOR * 1000 + 10#$PATCH))
+          test "$CODE" -gt 0 || CODE=1
+          echo "LUMA_VERSION_NAME=$VERSION" >> "$GITHUB_ENV"
+          echo "LUMA_VERSION_CODE=$CODE" >> "$GITHUB_ENV"
+          echo "Resolved version $VERSION ($CODE)"
       - name: Checkout Shiguang adapter warehouse
         uses: actions/checkout@v4
         with:
@@ -111,32 +146,27 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-      - name: Android SDK / NDK
-        run: yes | sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
-      - name: Export NDK_HOME
-        run: echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
+      - run: yes | sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
         with:
-          targets: aarch64-linux-android
-      - uses: Swatinem/rust-cache@v2
+          gradle-version: '8.9'
       - run: npm install
+      - name: Validate Android SQLite API usage
+        run: node scripts/validate-android-sqlite-usage.mjs
+      - name: Smoke test WakeUp profile converter
+        run: node scripts/test-wakeup-school-info.mjs
       - name: Bundle current university adapters
         env:
           SHIGUANG_SOURCE: .upstream/shiguang_warehouse
         run: node scripts/sync-shiguang-adapters.mjs
-      - run: npx tauri android init --ci --skip-targets-install
-      - run: npx tauri icon assets/app-icon.svg
-      - name: Restore optional Firebase Android config
-        env:
-          FIREBASE_GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.FIREBASE_GOOGLE_SERVICES_JSON_BASE64 }}
-        shell: bash
-        run: |
-          if [ -z "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" ]; then
-            echo "Firebase Android config not configured; continuing without google-services.json."
-            exit 0
-          fi
-          printf '%s' "$FIREBASE_GOOGLE_SERVICES_JSON_BASE64" | base64 --decode > src-tauri/gen/android/app/google-services.json
-          test -s src-tauri/gen/android/app/google-services.json || (echo "::error::Decoded google-services.json is empty" && exit 1)
+      - name: Validate bundled adapter contract
+        run: node scripts/validate-shiguang-contract.mjs
+      - name: Smoke test GDUT adapter
+        run: node scripts/test-gdut-adapter.mjs
+      - name: Check frontend
+        run: npm run check
+      - name: Build Svelte assets
+        run: npm run build
       - name: Restore Android signing key
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -145,29 +175,61 @@ jobs:
           STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
         shell: bash
         run: |
+          set -euo pipefail
           test -n "$KEYSTORE_BASE64" || (echo "::error::ANDROID_KEYSTORE_BASE64 is missing" && exit 1)
           test -n "$KEY_ALIAS" || (echo "::error::ANDROID_KEY_ALIAS is missing" && exit 1)
           test -n "$KEY_PASSWORD" || (echo "::error::ANDROID_KEY_PASSWORD is missing" && exit 1)
           test -n "$STORE_PASSWORD" || (echo "::error::ANDROID_STORE_PASSWORD is missing" && exit 1)
+          umask 077
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/lumaschedule-release.jks"
           test -s "$RUNNER_TEMP/lumaschedule-release.jks" || (echo "::error::Decoded Android keystore is empty" && exit 1)
-          cat > src-tauri/gen/android/keystore.properties <<EOF2
-          keyAlias=$KEY_ALIAS
-          keyPassword=$KEY_PASSWORD
-          storePassword=$STORE_PASSWORD
-          storeFile=$RUNNER_TEMP/lumaschedule-release.jks
-          EOF2
-      - run: node scripts/prepare-android-ci.mjs --signing --shrink
-      - name: Build optimized arm64 Release APK/AAB
-        run: npx tauri android build --apk --aab --target aarch64 --ci
-      - name: Report release sizes
+          keytool -list -keystore "$RUNNER_TEMP/lumaschedule-release.jks" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+      - name: Build signed native APK and AAB
+        env:
+          LUMA_VERSION_NAME: ${{ env.LUMA_VERSION_NAME }}
+          LUMA_VERSION_CODE: ${{ env.LUMA_VERSION_CODE }}
+          LUMA_KEYSTORE_PATH: ${{ runner.temp }}/lumaschedule-release.jks
+          LUMA_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          LUMA_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          LUMA_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: gradle -p android-native :app:assembleRelease :app:bundleRelease --no-daemon --stacktrace
+      - name: Verify and stage signed release
         shell: bash
         run: |
-          find src-tauri/gen/android/app/build/outputs \( -name '*.apk' -o -name '*.aab' \) -type f -print0 | xargs -0 -r ls -lh
+          set -euo pipefail
+          APK="$(find android-native/app/build/outputs/apk/release -name '*.apk' -type f | head -n 1)"
+          AAB="$(find android-native/app/build/outputs/bundle/release -name '*.aab' -type f | head -n 1)"
+          test -n "$APK" && test -n "$AAB"
+          mkdir -p release
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee release/SIGNING-CERTIFICATE.txt
+          jarsigner -verify -strict "$AAB" >/dev/null
+          if unzip -l "$APK" | grep -Eq ' lib/.*\.so$'; then
+            echo '::error::Native shared libraries unexpectedly found in release APK.'
+            exit 1
+          fi
+          cp "$APK" "release/LumaSchedule-v${LUMA_VERSION_NAME}.apk"
+          cp "$AAB" "release/LumaSchedule-v${LUMA_VERSION_NAME}.aab"
+          sha256sum release/*.apk release/*.aab > release/SHA256SUMS.txt
+          ls -lh release
+          cat release/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: lumaschedule-android-arm64-release
-          path: |
-            src-tauri/gen/android/app/build/outputs/**/*.apk
-            src-tauri/gen/android/app/build/outputs/**/*.aab
+          name: lumaschedule-android-release-${{ env.LUMA_VERSION_NAME }}
+          path: release/*
           if-no-files-found: error
+          retention-days: 90
+      - name: Publish GitHub Release
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "LumaSchedule $GITHUB_REF_NAME" \
+              --generate-notes
+          fi

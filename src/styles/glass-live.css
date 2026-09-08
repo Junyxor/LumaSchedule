@@ -1,0 +1,192 @@
+/*
+ * Live Liquid Glass material overrides.
+ * Imported after the mobile visual layer so user appearance controls always win.
+ * The material intentionally uses gradients + one backdrop pass instead of shaders
+ * so Android WebView stays compositing-friendly.
+ */
+.app-shell {
+  background:
+    radial-gradient(circle at 88% 2%, rgba(120,111,255,.25), transparent 27%),
+    radial-gradient(circle at 10% 31%, rgba(104,196,255,.14), transparent 28%),
+    radial-gradient(circle at 78% 82%, rgba(255,153,205,.12), transparent 30%),
+    linear-gradient(145deg, #fbfcff 0%, #eef2f8 46%, #f8f4fb 100%);
+}
+
+.ambient-a {
+  background: radial-gradient(circle,
+    rgba(130,117,255,.34) 0%,
+    rgba(133,203,255,.14) 44%,
+    rgba(255,255,255,0) 72%);
+}
+
+.ambient-b {
+  background: radial-gradient(circle,
+    rgba(255,158,205,.22) 0%,
+    rgba(140,215,255,.11) 48%,
+    rgba(255,255,255,0) 74%);
+}
+
+.glass-panel {
+  background:
+    linear-gradient(
+      118deg,
+      rgba(255,255,255,calc(.08 + var(--glass-highlight) * .22)) 0%,
+      rgba(255,255,255,0) 30%
+    ),
+    linear-gradient(
+      162deg,
+      rgba(255,255,255,calc(var(--glass-opacity) + .17)) 0%,
+      rgba(242,247,255,calc(var(--glass-opacity) - .14)) 54%,
+      rgba(253,241,250,calc(var(--glass-opacity) - .18)) 100%
+    );
+  -webkit-backdrop-filter:
+    blur(var(--glass-blur))
+    saturate(var(--glass-sat))
+    brightness(1.035)
+    contrast(1.025);
+  backdrop-filter:
+    blur(var(--glass-blur))
+    saturate(var(--glass-sat))
+    brightness(1.035)
+    contrast(1.025);
+  border-color: rgba(255,255,255,calc(.34 + var(--glass-highlight) * .60));
+  box-shadow:
+    0 16px 46px rgba(38,43,73,.085),
+    0 2px 10px rgba(83,92,155,calc(.015 + var(--glass-refraction) * .035)),
+    inset 0 1px 0 rgba(255,255,255,calc(.42 + var(--glass-highlight) * .54)),
+    inset 1px 0 0 rgba(255,255,255,calc(.10 + var(--glass-highlight) * .20)),
+    inset 0 -1px 0 rgba(74,79,112,.055);
+}
+
+.refract::after {
+  background:
+    linear-gradient(
+      105deg,
+      transparent 9%,
+      rgba(255,255,255,calc(var(--glass-refraction) * .12)) 34%,
+      rgba(255,255,255,calc(var(--glass-refraction) * .56)) 48%,
+      rgba(191,222,255,calc(var(--glass-refraction) * .22)) 53%,
+      rgba(255,200,232,calc(var(--glass-refraction) * .18)) 58%,
+      transparent 82%
+    );
+  opacity: calc(.24 + var(--glass-refraction) * .76);
+  mix-blend-mode: screen;
+}
+
+.sliders input[type="range"] {
+  touch-action: none;
+  accent-color: #5b56d6;
+}
+
+@media (max-width: 760px) {
+  .mobile-nav,
+  .apple-search,
+  .import-toolbar,
+  .adapter-browser,
+  .next-card,
+  .apple-hero {
+    -webkit-backdrop-filter:
+      blur(var(--glass-blur))
+      saturate(var(--glass-sat))
+      brightness(1.035)
+      contrast(1.02);
+    backdrop-filter:
+      blur(var(--glass-blur))
+      saturate(var(--glass-sat))
+      brightness(1.035)
+      contrast(1.02);
+  }
+
+  .mobile-nav {
+    background:
+      linear-gradient(112deg, rgba(255,255,255,calc(.08 + var(--glass-highlight) * .20)), transparent 34%),
+      linear-gradient(
+        180deg,
+        rgba(255,255,255,calc(var(--glass-opacity) + .20)),
+        rgba(238,241,252,calc(var(--glass-opacity) - .17))
+      );
+    border-color: rgba(255,255,255,calc(.38 + var(--glass-highlight) * .58));
+    box-shadow:
+      0 18px 44px rgba(34,39,68,calc(.09 + var(--glass-refraction) * .09)),
+      0 3px 14px rgba(89,80,194,calc(.02 + var(--glass-refraction) * .05)),
+      inset 0 1px 0 rgba(255,255,255,calc(.38 + var(--glass-highlight) * .58)),
+      inset 0 -1px 0 rgba(67,72,104,.055);
+  }
+  .mobile-nav::before {
+    height: 1.5px;
+    opacity: calc(.26 + var(--glass-refraction) * .74);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(190,221,255,.72),
+      rgba(255,255,255,.98),
+      rgba(255,203,232,.60),
+      transparent
+    );
+  }
+  .mobile-nav button.active {
+    background:
+      radial-gradient(circle at 50% 0%, rgba(255,255,255,.78), transparent 54%),
+      linear-gradient(180deg, rgba(255,255,255,.58), rgba(214,211,255,.34));
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,.94),
+      0 5px 16px rgba(83,74,190,.12);
+  }
+
+  .apple-search,
+  .import-toolbar {
+    background:
+      linear-gradient(115deg, rgba(255,255,255,calc(.07 + var(--glass-highlight) * .18)), transparent 31%),
+      linear-gradient(
+        180deg,
+        rgba(255,255,255,calc(var(--glass-opacity) + .17)),
+        rgba(241,245,253,calc(var(--glass-opacity) - .15))
+      );
+    border: 1px solid rgba(255,255,255,calc(.32 + var(--glass-highlight) * .57));
+    box-shadow:
+      0 9px 26px rgba(43,47,72,calc(.04 + var(--glass-refraction) * .065)),
+      inset 0 1px 0 rgba(255,255,255,calc(.36 + var(--glass-highlight) * .58));
+  }
+
+  .adapter-browser {
+    background:
+      linear-gradient(120deg, rgba(255,255,255,calc(.08 + var(--glass-highlight) * .19)), transparent 34%),
+      linear-gradient(
+        180deg,
+        rgba(250,252,255,calc(var(--glass-opacity) + .16)),
+        rgba(236,240,250,calc(var(--glass-opacity) - .12))
+      );
+    border-color: rgba(255,255,255,calc(.36 + var(--glass-highlight) * .58));
+    box-shadow:
+      0 -18px 52px rgba(25,29,48,calc(.10 + var(--glass-refraction) * .09)),
+      inset 0 1px 0 rgba(255,255,255,calc(.40 + var(--glass-highlight) * .57));
+  }
+
+  .next-card,
+  .apple-hero {
+    background:
+      radial-gradient(circle at 16% 5%, rgba(255,255,255,calc(.10 + var(--glass-highlight) * .19)), transparent 38%),
+      linear-gradient(
+        145deg,
+        rgba(255,255,255,calc(var(--glass-opacity) + .15)),
+        rgba(225,232,255,calc(var(--glass-opacity) - .18)) 68%,
+        rgba(250,230,245,calc(var(--glass-opacity) - .20))
+      );
+    border-color: rgba(255,255,255,calc(.37 + var(--glass-highlight) * .58));
+    box-shadow:
+      0 17px 44px rgba(72,67,142,calc(.06 + var(--glass-refraction) * .075)),
+      inset 0 1px 0 rgba(255,255,255,calc(.39 + var(--glass-highlight) * .58));
+  }
+
+  .motion .mobile-nav,
+  .motion .adapter-browser,
+  .motion .apple-search,
+  .motion .import-toolbar {
+    transition:
+      background .20s ease,
+      border-color .20s ease,
+      box-shadow .20s ease,
+      backdrop-filter .20s ease,
+      -webkit-backdrop-filter .20s ease;
+  }
+}

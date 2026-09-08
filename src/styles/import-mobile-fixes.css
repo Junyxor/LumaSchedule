@@ -1,0 +1,56 @@
+@media (max-width: 760px) {
+  /* The school picker has a variable number of sections (search, generic adapters,
+     result list, status). A flex column avoids implicit CSS-grid rows collapsing
+     into each other on short Android viewports. */
+  .adapter-browser {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .sheet-grabber,
+  .adapter-browser-head,
+  .school-search,
+  .generic-adapters,
+  .adapter-subbar,
+  .adapter-session,
+  .adapter-error,
+  .adapter-sandbox-note {
+    flex: 0 0 auto;
+  }
+
+  .school-search {
+    position: relative;
+    z-index: 2;
+  }
+
+  .generic-adapters {
+    position: relative;
+    z-index: 1;
+    margin: 0;
+    padding: 2px 2px 4px;
+  }
+
+  .generic-adapters > span {
+    display: block;
+    line-height: 1.35;
+    margin-bottom: 1px;
+  }
+
+  .generic-adapters > div {
+    align-items: center;
+  }
+
+  .school-list,
+  .adapter-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .adapter-loading {
+    flex: 1 1 auto;
+    min-height: 110px;
+  }
+}

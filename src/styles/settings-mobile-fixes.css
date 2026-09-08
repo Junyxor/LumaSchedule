@@ -1,0 +1,221 @@
+@media (max-width: 760px) {
+  /* Settings should read like a native settings app, not a desktop admin form. */
+  .page-settings .settings-layout {
+    display: block;
+  }
+
+  .page-settings .settings-main,
+  .page-settings .settings-side {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .page-settings .settings-side {
+    margin-top: 14px;
+  }
+
+  .page-settings .settings-card {
+    border-radius: 24px;
+    padding: 16px;
+    overflow: hidden;
+  }
+
+  .page-settings .settings-title {
+    margin-bottom: 12px;
+  }
+
+  .page-settings .settings-title > span {
+    width: 42px;
+    height: 42px;
+    border-radius: 14px;
+    flex: 0 0 42px;
+  }
+
+  .page-settings .settings-title b {
+    font-size: 16px;
+  }
+
+  .page-settings .settings-title p {
+    margin-top: 3px;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  /* Turn the semester form into compact Settings-style rows. */
+  .page-settings .schedule-form {
+    display: block;
+    margin: 0;
+    border-top: 1px solid rgba(60,60,67,.08);
+  }
+
+  .page-settings .schedule-form label,
+  .page-settings .schedule-form label.wide {
+    min-height: 52px;
+    display: grid;
+    grid-template-columns: minmax(92px, .72fr) minmax(0, 1.28fr);
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid rgba(60,60,67,.08);
+  }
+
+  .page-settings .schedule-form label > span {
+    padding: 0;
+    font-size: 12px;
+    color: rgba(60,60,67,.68);
+  }
+
+  .page-settings .schedule-form input,
+  .page-settings .schedule-form select {
+    width: 100%;
+    min-width: 0;
+    min-height: 38px;
+    height: 38px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 11px;
+    background: rgba(118,118,128,.065);
+    text-align: right;
+    font-size: 13px;
+  }
+
+  .page-settings .schedule-form input[type='date'] {
+    text-align: right;
+  }
+
+  .page-settings .schedule-form input:disabled,
+  .page-settings .schedule-form select:disabled {
+    background: transparent;
+  }
+
+  .page-settings .weekend-setting {
+    margin: 12px 0 2px;
+    padding: 12px 0 0;
+    border: 0;
+    border-radius: 0;
+    border-top: 1px solid rgba(60,60,67,.08);
+    background: transparent;
+    gap: 10px;
+  }
+
+  .page-settings .weekend-setting > div:first-child {
+    display: block;
+  }
+
+  .page-settings .weekend-setting > div:first-child b,
+  .page-settings .weekend-setting > div:first-child span {
+    display: block;
+  }
+
+  .page-settings .weekend-setting > div:first-child b {
+    font-size: 13px;
+  }
+
+  .page-settings .weekend-setting > div:first-child span {
+    margin-top: 3px;
+    font-size: 10px;
+    line-height: 1.4;
+  }
+
+  .page-settings .weekend-segments {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .page-settings .weekend-segments button {
+    min-width: 0;
+    min-height: 38px;
+    padding: 0 7px;
+    border-radius: 12px;
+    white-space: nowrap;
+    font-size: 11px;
+  }
+
+  .page-settings .display-toggles {
+    margin-top: 12px;
+    border-top: 1px solid rgba(60,60,67,.08);
+  }
+
+  .page-settings .toggle-row,
+  .page-settings .setting-row {
+    min-height: 58px;
+    padding-left: 2px;
+    padding-right: 2px;
+  }
+
+  .page-settings .toggle-row b,
+  .page-settings .setting-row b {
+    font-size: 13px;
+  }
+
+  .page-settings .toggle-row small,
+  .page-settings .setting-row span {
+    font-size: 10px;
+    line-height: 1.4;
+  }
+
+  .page-settings .schedule-save {
+    margin-top: 12px;
+  }
+
+  .page-settings .schedule-save button {
+    width: 100%;
+    min-height: 44px;
+    border-radius: 14px;
+  }
+
+  .page-settings .webdav-pair {
+    grid-template-columns: 1fr;
+  }
+
+  .page-settings .settings-actions {
+    gap: 7px;
+  }
+
+  .page-settings .settings-actions button {
+    min-width: 0;
+    flex: 1 1 0;
+    padding-inline: 9px;
+    font-size: 10px;
+  }
+
+  .page-settings .project-sources {
+    padding-bottom: 4px;
+  }
+}
+
+@media (max-width: 760px) {
+  .page-settings .settings-card,
+  .page-settings .settings-card > *,
+  .page-settings .settings-side,
+  .page-settings .settings-main {
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .page-setttings .setting-row {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
+  .page-settings .setting-row > div {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .page-settings .setting-row > div > b,
+  .page-settings .setting-row > div > span {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .page-settings .setting-row > em {
+    flex: 0 0 auto;
+    max-width: 92px;
+    margin-left: 10px;
+    white-space: nowrap;
+  }
+}

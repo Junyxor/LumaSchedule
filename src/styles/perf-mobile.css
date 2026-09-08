@@ -1,0 +1,68 @@
+/*
+ * Android WebView paint/compositing optimizations.
+ * Keep the Liquid Glass look on the small interactive control layer while
+ * avoiding expensive full-page blur/raster work during scroll.
+ */
+@media (max-width: 760px) {
+  /* The radial gradients are already visually soft; a second live CSS blur
+     only forces large offscreen surfaces to be re-rasterized. */
+  .ambient-a,
+  .ambient-b {
+    filter: none !important;
+    contain: strict;
+    pointer-events: none;
+  }
+
+  .motion .ambient-a,
+  .motion .ambient-b {
+    will-change: transform;
+  }
+
+  /* A single composited fixed Tab Bar is cheaper than repeatedly merging it
+     into the scrolling page. We intentionally do not add will-change to every
+     glass card. */
+  .mobile-nav {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+
+  /* Long settings/import pages do not need layout+paint work for content that
+     is several screens away. Chromium/WebView retains an intrinsic placeholder
+     and paints it only when it approaches the viewport. */
+  .page-settings .settings-card,
+  .page-settings .about-card,
+  .page-import .source-card,
+  .page-import .import-hero,
+  .page-import .import-preview,
+  .page-widgets .widget-card {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 110px;
+  }
+
+  .adapter-browser,
+  .course-editor,
+  .week-scroll,
+  .school-list,
+  .adapter-list {
+    overscroll-behavior: contain;
+  }
+
+  /* Course blocks never need to repaint outside their own box. */
+  .week-course {
+    contain: layout paint style;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-a,
+  .ambient-b {
+    animation: none !important;
+  }
+
+  .motion .mobile-nav,
+  .motion .adapter-browser,
+  .motion .apple-search,
+  .motion .import-toolbar {
+    transition-duration: 0.01ms !important;
+  }
+}

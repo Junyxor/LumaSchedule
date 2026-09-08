@@ -4,3 +4,14 @@
 @import './styles/part4.css';
 @import './styles/part5.css';
 @import './styles/part6.css';
+@import './styles/apple-mobile.css';
+@import './styles/mobile-runtime.css';
+@import './styles/glass-live.css';
+@import './styles/perf-mobile.css';
+@import './styles/import-mobile-fixes.css';
+@import './styles/settings-mobile-fixes.css';
+
+html, body, #app, .app-shell {
+  touch-action: pan-x pan-y;
+  overscroll-behavior: none;
+}

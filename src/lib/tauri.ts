@@ -1,49 +1,206 @@
-import { invoke } from '@tauri-apps/api/core';
-import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
-import { open, save } from '@tauri-apps/plugin-dialog';
-import { readTextFile, writeTextFile } from '@tauri-apps/plugin-fs';
-import type { BackupSummary, Course, GlassSettings, ImportBundle, ShiguangAdapter, ShiguangImportStart, ShiguangSchool, ShiguangSessionSnapshot, WebDavCredentials, WebDavProfile, WebDavResult } from './types';
+import type {
+  BackupSummary,
+  CompatibilityFamily,
+  Course,
+  CourseMutation,
+  CourseReminderSettings,
+  GlassSettings,
+  GradeImportBundle,
+  GradeImportResult,
+  GradeSnapshot,
+  ImportBundle,
+  ImportCommitResult,
+  ImportDiff,
+  ImportMode,
+  ReminderSyncReport,
+  SchedulePreferences,
+  ScheduleSnapshot,
+  ShiguangAdapter,
+  ShiguangImportStart,
+  ShiguangSchool,
+  ShiguangSessionSnapshot,
+  WebDavCredentials,
+  WebDavProfile,
+  WebDavResult
+} from './types';
+import { importText } from './importers';
+import { invokeNative, unwrap } from './nativeBridge';
 
-export async function getBootstrap() { return invoke<{ appVersion: string; glassSettings?: GlassSettings | null; dbReady: boolean }>('get_bootstrap'); }
-export async function listScheduleCourses() { return invoke<Course[]>('list_schedule_courses'); }
-export async function saveGlassSettings(settings: GlassSettings) { try { return await invoke('save_glass_settings', { settings }); } catch { localStorage.setItem('luma.glass', JSON.stringify(settings)); } }
-export async function importText(format: string, payload: string) { return invoke<ImportBundle>('import_schedule_text', { format, payload }); }
-export async function commitImport(bundle: ImportBundle) { return invoke<{ termId: string; scheduleId: string; courseCount: number; meetingCount: number }>('commit_import_bundle', { bundle }); }
+export { importText };
+
+export function getBootstrap() {
+  return invokeNative<{
+    appVersion: string;
+    glassSettings?: GlassSettings | null;
+    dbReady: boolean;
+    nativeCore?: boolean;
+    startupMs?: number;
+  }>('get_bootstrap');
+}
+
+export async function listScheduleCourses(): Promise<Course[]> {
+  return (await getScheduleSnapshot()).courses;
+}
+
+export function getScheduleSnapshot() {
+  return invokeNative<ScheduleSnapshot>('get_schedule_snapshot');
+}
+
+export function getSchedulePreferences() {
+  return invokeNative<SchedulePreferences>('get_schedule_preferences');
+}
+
+export function saveSchedulePreferences(preferences: SchedulePreferences) {
+  return invokeNative<SchedulePreferences>('save_schedule_preferences', { preferences });
+}
+
+export async function saveScheduleCourse(course: CourseMutation) {
+  return unwrap(await invokeNative<{ value: string }>('save_schedule_course', { course }));
+}
+
+export function deleteScheduleCourse(id: string) {
+  return invokeNative<void>('delete_schedule_course', { id });
+}
+
+export async function saveGlassSettings(settings: GlassSettings) {
+  localStorage.setItem('luma.glass', JSON.stringify(settings));
+  await invokeNative<void>('save_glass_settings', { settings }).catch(() => undefined);
+}
+
+export function getGradeSnapshot() {
+  return invokeNative<GradeSnapshot>('get_grade_snapshot');
+}
+
+export function commitGradeBundle(bundle: GradeImportBundle) {
+  return invokeNative<GradeImportResult>('commit_grade_bundle', { bundle });
+}
+
+export function previewImport(bundle: ImportBundle) {
+  return invokeNative<ImportDiff>('preview_import_bundle', { bundle });
+}
+
+export function commitImport(bundle: ImportBundle, mode: ImportMode = 'new') {
+  return invokeNative<ImportCommitResult>('commit_import_bundle', { bundle, mode });
+}
+
+export async function ensureNotificationPermission() {
+  return unwrap(
+    await invokeNative<{ value: boolean }>('request_notification_permission')
+  );
+}
+
 export async function testNotification() {
-  let granted = await isPermissionGranted(); if (!granted) granted = (await requestPermission()) === 'granted';
-  if (granted) sendNotification({ title: 'LumaSchedule', body: '课程提醒已启用：下一节「高等数学」将在 20 分钟后开始。' });
+  return unwrap(await invokeNative<{ value: boolean }>('test_notification'));
 }
-export async function publishWidgetSnapshot(snapshot: { courseName: string; courseMeta: string; countdown: string; }) {
-  try { return await invoke<boolean>('update_widget_snapshot', { snapshot }); } catch { return false; }
+
+export function getCourseReminderSettings() {
+  return invokeNative<CourseReminderSettings>('get_course_reminder_settings');
 }
+
+export function saveCourseReminderSettings(settings: CourseReminderSettings) {
+  return invokeNative<CourseReminderSettings>('save_course_reminder_settings', { settings });
+}
+
+export function syncCourseReminders() {
+  return invokeNative<ReminderSyncReport>('sync_course_reminders', {}, 120_000);
+}
+
+export async function publishWidgetSnapshot(snapshot: {
+  courseName: string;
+  courseMeta: string;
+  countdown: string;
+}) {
+  return unwrap(
+    await invokeNative<{ value: boolean }>('update_widget_snapshot', { snapshot })
+  );
+}
+
 export async function scheduleTestReminder(delayMs = 60_000) {
-  let granted = await isPermissionGranted(); if (!granted) granted = (await requestPermission()) === 'granted'; if (!granted) return false;
   const id = Math.floor(Date.now() % 2_000_000_000);
-  return invoke<boolean>('schedule_native_reminder', { reminder: { id, triggerAtEpochMs: Date.now() + delayMs, title: 'LumaSchedule · 课程提醒', body: '这是由 Android 原生 AlarmManager 触发的测试提醒。' } });
+  return unwrap(
+    await invokeNative<{ value: boolean }>('schedule_native_reminder', {
+      reminder: {
+        id,
+        triggerAtEpochMs: Date.now() + delayMs,
+        title: 'LumaSchedule · 测试提醒',
+        body: '后台定时提醒触发成功。'
+      }
+    })
+  );
 }
-export async function listShiguangSchools(query = '') { return invoke<ShiguangSchool[]>('shiguang_list_schools', { query: query || null }); }
-export async function listShiguangAdapters(schoolId: string) { return invoke<ShiguangAdapter[]>('shiguang_list_adapters', { schoolId }); }
-export async function startShiguangImport(schoolId: string, adapterId: string) { return invoke<ShiguangImportStart>('shiguang_start_import', { schoolId, adapterId }); }
-export async function getShiguangSession(sessionId: string) { return invoke<ShiguangSessionSnapshot>('shiguang_get_session', { sessionId }); }
-export async function closeShiguangSession(sessionId: string) { return invoke<void>('shiguang_close_session', { sessionId }); }
-export async function saveLatestScheduleJson() {
-  const payload = await invoke<string>('export_latest_schedule_json'); const path = await save({ defaultPath: 'LumaSchedule-schedule.json', filters: [{ name: 'LumaSchedule JSON', extensions: ['json'] }] });
-  if (!path) return false; await writeTextFile(path, payload); return true;
+
+export function listShiguangSchools(query = '') {
+  return invokeNative<ShiguangSchool[]>('shiguang_list_schools', {
+    query: query.trim()
+  });
 }
-export async function saveLatestScheduleIcs() {
-  const payload = await invoke<string>('export_latest_schedule_ics'); const path = await save({ defaultPath: 'LumaSchedule-calendar.ics', filters: [{ name: 'iCalendar', extensions: ['ics'] }] });
-  if (!path) return false; await writeTextFile(path, payload); return true;
+
+export function listShiguangAdapters(schoolId: string) {
+  return invokeNative<ShiguangAdapter[]>('shiguang_list_adapters', { schoolId });
 }
-export async function saveFullBackup() {
-  const payload = await invoke<string>('export_full_backup'); const path = await save({ defaultPath: 'LumaSchedule-backup.luma.json', filters: [{ name: 'LumaSchedule Backup', extensions: ['json'] }] });
-  if (!path) return false; await writeTextFile(path, payload); return true;
+
+export function startShiguangImport(schoolId: string, adapterId: string) {
+  return invokeNative<ShiguangImportStart>('shiguang_start_import', {
+    schoolId,
+    adapterId
+  });
 }
-export async function restoreFullBackupFromFile() {
-  const path = await open({ multiple: false, directory: false, filters: [{ name: 'LumaSchedule Backup', extensions: ['json'] }] });
-  if (!path || Array.isArray(path)) return null; const payload = await readTextFile(path); return invoke<BackupSummary>('restore_full_backup', { payload });
+
+export function startCompatibilityImport(url: string, family: CompatibilityFamily, schoolName = '') {
+  return invokeNative<ShiguangImportStart>('shiguang_start_custom_import', {
+    url: url.trim(),
+    family,
+    schoolName: schoolName.trim()
+  });
 }
-export async function getWebDavProfile() { return invoke<WebDavProfile>('get_webdav_profile'); }
-export async function saveWebDavProfile(profile: WebDavProfile) { return invoke<void>('save_webdav_profile', { profile }); }
-export async function testWebDav(credentials: WebDavCredentials) { return invoke<WebDavResult>('webdav_test', { credentials }); }
-export async function uploadWebDavBackup(credentials: WebDavCredentials) { return invoke<WebDavResult>('webdav_upload_backup', { credentials }); }
-export async function restoreWebDavBackup(credentials: WebDavCredentials) { return invoke<WebDavResult>('webdav_restore_backup', { credentials }); }
+
+export function startGradeCapture(url: string, institution = '') {
+  return invokeNative<ShiguangImportStart>('shiguang_start_grade_capture', {
+    url: url.trim(),
+    institution: institution.trim()
+  });
+}
+
+export function getShiguangSession(sessionId: string) {
+  return invokeNative<ShiguangSessionSnapshot>('shiguang_get_session', { sessionId });
+}
+
+export function closeShiguangSession(sessionId: string) {
+  return invokeNative<void>('shiguang_close_session', { sessionId });
+}
+
+export function saveLatestScheduleJson() {
+  return invokeNative<boolean>('export_latest_schedule_json_to_file', {}, 300_000);
+}
+
+export function saveLatestScheduleIcs() {
+  return invokeNative<boolean>('export_latest_schedule_ics_to_file', {}, 300_000);
+}
+
+export function saveFullBackup() {
+  return invokeNative<boolean>('export_full_backup_to_file', {}, 300_000);
+}
+
+export function restoreFullBackupFromFile() {
+  return invokeNative<BackupSummary | null>('restore_full_backup_from_file', {}, 300_000);
+}
+
+export function getWebDavProfile() {
+  return invokeNative<WebDavProfile>('get_webdav_profile');
+}
+
+export function saveWebDavProfile(profile: WebDavProfile) {
+  return invokeNative<void>('save_webdav_profile', { profile });
+}
+
+export function testWebDav(credentials: WebDavCredentials) {
+  return invokeNative<WebDavResult>('webdav_test', { credentials }, 60_000);
+}
+
+export function uploadWebDavBackup(credentials: WebDavCredentials) {
+  return invokeNative<WebDavResult>('webdav_upload_backup', { credentials }, 120_000);
+}
+
+export function restoreWebDavBackup(credentials: WebDavCredentials) {
+  return invokeNative<WebDavResult>('webdav_restore_backup', { credentials }, 120_000);
+}

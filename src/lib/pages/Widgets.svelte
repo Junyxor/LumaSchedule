@@ -1,8 +1,27 @@
 <script lang="ts">
-  import { BellRing, ChevronRight, MonitorSmartphone, Smartphone } from 'lucide-svelte';
-  const widgets = [
-    { size: '2×1', title: '下一节课', desc: '最轻量，显示时间 / 教室 / 倒计时', cls: 'tiny' }, { size: '4×2', title: '今日课程', desc: '最近三节课与进度', cls: 'medium' },
-    { size: '5×3', title: '今天 · 明天', desc: '双日列表，支持明日预告', cls: 'wide' }, { size: '5×4', title: '周课表', desc: '完整周视图，可跟随主题', cls: 'large' }
-  ];
+  import { Smartphone, Sparkles } from 'lucide-svelte';
 </script>
-<section class="page page-widgets"><header class="topbar"><div><span class="eyebrow">HOME & LOCK SCREEN</span><h1>小组件</h1><p>课程信息应该在你打开 App 之前就已经可见。</p></div></header><div class="widget-grid">{#each widgets as widget, i}<button class="widget-card glass-panel"><div class="widget-preview {widget.cls}">{#if i === 0}<span>下一节 · 24分钟</span><b>大学英语</b><small>13:50 · 教3-106</small>{:else if i === 1}<span>今天 · 3节</span><b>大学英语</b><small>13:50 教3-106</small><small>16:30 高等数学</small>{:else if i === 2}<span>今天</span><b>大学英语 · 13:50</b><small>明天第一节 08:30 大学物理</small>{:else}<span>第1周</span><b>一 二 三 四 五</b><small>课表网格预览</small>{/if}</div><div class="widget-meta"><span>{widget.size}</span><b>{widget.title}</b><p>{widget.desc}</p></div><ChevronRight size={18} /></button>{/each}</div><div class="platform-cards"><article class="platform-card glass-panel"><span><Smartphone size={21} /></span><div><b>Android</b><p>桌面 Widget、常驻下一节通知、勿扰/静音自动化。</p></div><em>原生</em></article><article class="platform-card glass-panel"><span><MonitorSmartphone size={21} /></span><div><b>iOS / iPadOS</b><p>WidgetKit、锁屏小组件、Live Activity 接口预留。</p></div><em>规划中</em></article><article class="platform-card glass-panel"><span><BellRing size={21} /></span><div><b>课程提醒</b><p>课前 N 分钟、明日预告、临时调课、节假日过滤。</p></div><em>核心功能</em></article></div></section>
+
+<section class="page page-widgets">
+  <header class="topbar"><div><span class="eyebrow">小组件</span><h1>桌面小组件</h1><p>v0.1 只展示已经接通的 Android 原生能力。</p></div></header>
+
+  <article class="widget-focus content-surface">
+    <div class="widget-preview tiny">
+      <span>下一节</span>
+      <b>课程名称</b>
+      <small>时间 · 教室</small>
+    </div>
+    <div class="widget-focus-copy">
+      <span class="soft-badge"><Sparkles size={13}/> Android 原生</span>
+      <h2>下一节课</h2>
+      <p>App 会把本地下节课快照同步给系统桌面小组件。实际内容来自你的本地课表，不使用演示课程。</p>
+      <small>在系统桌面长按空白处 → 小组件 → LumaSchedule 添加。</small>
+    </div>
+  </article>
+
+  <article class="platform-card content-surface widget-status-row">
+    <span><Smartphone size={21}/></span>
+    <div><b>更多尺寸</b><p>今日列表、双日和完整周课表小组件尚未完成，因此 v0.1 不再显示成可用入口。</p></div>
+    <em>后续</em>
+  </article>
+</section>
