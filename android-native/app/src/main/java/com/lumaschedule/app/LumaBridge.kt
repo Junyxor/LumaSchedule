@@ -107,6 +107,12 @@ class LumaBridge(
                 result.toString()
             }
 
+            "get_grade_snapshot" -> database.getGradeSnapshot().toString()
+
+            "commit_grade_bundle" -> database
+                .commitGradeBundle(args.getJSONObject("bundle"))
+                .toString()
+
             "save_schedule_course" -> {
                 val id = database.saveScheduleCourse(args.getJSONObject("course"))
                 resyncRemindersIfEnabled()
@@ -196,6 +202,23 @@ class LumaBridge(
                     activity,
                     args.getString("schoolId"),
                     args.getString("adapterId")
+                )
+                .toString()
+
+            "shiguang_start_custom_import" -> shiguang
+                .startCustomImport(
+                    activity,
+                    args.getString("url"),
+                    args.getString("family"),
+                    args.optString("schoolName")
+                )
+                .toString()
+
+            "shiguang_start_grade_capture" -> shiguang
+                .startGradeCapture(
+                    activity,
+                    args.getString("url"),
+                    args.optString("institution")
                 )
                 .toString()
 
