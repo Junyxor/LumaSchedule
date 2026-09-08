@@ -1,4 +1,5 @@
 import type { ScheduleSnapshot } from './types';
+import { hydrateCourseCredits } from './courseCredits';
 import { getScheduleSnapshot } from './tauri';
 
 declare global {
@@ -17,5 +18,7 @@ export async function getFullScheduleSnapshot(): Promise<ScheduleSnapshot> {
   if (!bridge) return getScheduleSnapshot();
   const raw = bridge.snapshot();
   const parsed = JSON.parse(raw) as ScheduleSnapshot;
-  return parsed && Array.isArray(parsed.courses) ? parsed : getScheduleSnapshot();
+  return parsed && Array.isArray(parsed.courses)
+    ? { ...parsed, courses: hydrateCourseCredits(parsed.courses) }
+    : getScheduleSnapshot();
 }
