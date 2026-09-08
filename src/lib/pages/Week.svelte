@@ -42,21 +42,26 @@
   }
 
   function weekContext(date: Date) {
-    const monday = new Date(date);
-    monday.setHours(0, 0, 0, 0);
-    monday.setDate(date.getDate() - ((date.getDay() + 6) % 7));
-    const days = weekdayNames.map((label, index) => {
-      const item = new Date(monday);
-      item.setDate(monday.getDate() + index);
-      return {
-        label,
-        dayNumber: index + 1,
+    const sundayFirst = preferences.weekStartsOn === 7;
+    const jsDay = date.getDay();
+    const offset = sundayFirst ? jsDay : (jsDay + 6) % 7;
+    const start = new Date(date);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(date.getDate() - offset);
+    const order = sundayFirst ? [7,1,2,3,4,5,6] : [1,2,3,4,5,6,7];
+    const days = new Map<number, { label: string; dayNumber: number; date: string; month: number; fullDate: Date }>();
+    order.forEach((dayNumber, index) => {
+      const item = new Date(start);
+      item.setDate(start.getDate() + index);
+      days.set(dayNumber, {
+        label: weekdayNames[dayNumber - 1],
+        dayNumber,
         date: String(item.getDate()).padStart(2, '0'),
         month: item.getMonth() + 1,
         fullDate: item
-      };
+      });
     });
-    return { days, todayDayNumber: ((date.getDay() + 6) % 7) + 1 };
+    return { days, order, todayDayNumber: ((date.getDay() + 6) % 7) + 1 };
   }
 
   function normalizedWeekendMode(): WeekendMode {
@@ -64,16 +69,15 @@
     return preferences.showWeekend === false ? 'weekdays' : 'auto';
   }
 
-  function resolveVisibleDayNumbers(mode: WeekendMode) {
-    const weekdays = [1, 2, 3, 4, 5];
-    if (mode === 'weekdays') return weekdays;
-    if (mode === 'sat') return [...weekdays, 6];
-    if (mode === 'sun') return [...weekdays, 7];
-    if (mode === 'both') return [...weekdays, 6, 7];
-    const result = [...weekdays];
-    if (courses.some((course) => course.day === 6)) result.push(6);
-    if (courses.some((course) => course.day === 7)) result.push(7);
-    return result;
+  function resolveVisibleDayNumbers(mode: WeekendMode, order: number[]) {
+    const included = new Set([1,2,3,4,5]);
+    if (mode === 'sat' || mode === 'both') included.add(6);
+    if (mode === 'sun' || mode === 'both') included.add(7);
+    if (mode === 'auto') {
+      if (courses.some((course) => course.day === 6)) included.add(6);
+      if (courses.some((course) => course.day === 7)) included.add(7);
+    }
+    return order.filter((day) => included.has(day));
   }
 
   function weeksToText(weeks: number[]) {
@@ -186,15 +190,16 @@
 
   $: context = weekContext(now);
   $: weekendMode = normalizedWeekendMode();
-  $: visibleDayNumbers = resolveVisibleDayNumbers(weekendMode);
-  $: visibleDays = visibleDayNumbers.map((day) => context.days[day - 1]);
+  $: visibleDayNumbers = resolveVisibleDayNumbers(weekendMode, context.order);
+  $: visibleDays = visibleDayNumbers.map((day) => context.days.get(day)).filter((day): day is NonNullable<typeof day> => Boolean(day));
   $: visibleCourses = courses.filter((course) => visibleDayNumbers.includes(course.day));
   $: dayCount = visibleDayNumbers.length;
   $: sectionCount = Math.max(preferences.defaultSections || 12, ...visibleCourses.map((course) => course.endSection || 0));
   $: sections = Array.from({ length: sectionCount }, (_, i) => i + 1);
   $: rowHeight = preferences.compactMode ? 54 : 65;
-  $: lastVisibleDay = visibleDays[visibleDays.length - 1] ?? context.days[4];
-  $: rangeLabel = `${context.days[0].month}月${context.days[0].fullDate.getDate()}日 – ${lastVisibleDay.month}月${lastVisibleDay.fullDate.getDate()}日`;
+  $: firstVisibleDay = visibleDays[0];
+  $: lastVisibleDay = visibleDays[visibleDays.length - 1];
+  $: rangeLabel = firstVisibleDay && lastVisibleDay ? `${firstVisibleDay.month}月${firstVisibleDay.fullDate.getDate()}日 – ${lastVisibleDay.month}月${lastVisibleDay.fullDate.getDate()}日` : '';
   $: title = currentWeek ? `第 ${currentWeek} 周` : '本周课表';
   $: subtitle = [termName, visibleCourses.length ? `${visibleCourses.length} 个课程时段` : hasSchedule ? '当前周暂无课程' : '还没有课表'].filter(Boolean).join(' · ');
 </script>
