@@ -38,9 +38,12 @@ class LumaDatabase(context: Context) : Closeable {
         db.execSQL("CREATE TABLE IF NOT EXISTS sync_profiles (id TEXT PRIMARY KEY, kind TEXT NOT NULL, display_name TEXT NOT NULL, config_json TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, last_sync_at TEXT)")
         db.execSQL("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL)")
         db.execSQL("CREATE TABLE IF NOT EXISTS import_audit (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, summary_json TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS grade_records (id TEXT PRIMARY KEY, source TEXT NOT NULL, institution TEXT NOT NULL DEFAULT '', term_label TEXT NOT NULL, course_code TEXT NOT NULL DEFAULT '', course_name TEXT NOT NULL, course_type TEXT NOT NULL DEFAULT '', credit REAL, score_text TEXT NOT NULL DEFAULT '', numeric_score REAL, grade_point REAL, elective INTEGER NOT NULL DEFAULT 0, attempt INTEGER NOT NULL DEFAULT 1, imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_courses_schedule ON courses(schedule_id)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_meetings_course_day ON course_meetings(course_id, weekday, start_section)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_schedules_term ON schedules(term_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_grades_term_name ON grade_records(term_label, course_name)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_grades_source_term ON grade_records(source, institution, term_label)")
     }
 
     fun getSettingRaw(key: String): String? = synchronized(lock) { getSettingRawUnlocked(key) }
@@ -136,6 +139,121 @@ class LumaDatabase(context: Context) : Closeable {
             db.execSQL("UPDATE schedules SET week_starts_on=? WHERE id=?", arrayOf(weekStartsOn, scheduleId))
         }
         schedulePreferencesUnlocked()
+    }
+
+    fun getGradeSnapshot(): JSONObject = synchronized(lock) {
+        val records = JSONArray()
+        val terms = linkedSetOf<String>()
+        val institutions = linkedSetOf<String>()
+        var updatedAt: String? = null
+        db.rawQuery(
+            "SELECT id, source, institution, term_label, course_code, course_name, course_type, credit, score_text, numeric_score, grade_point, elective, attempt, imported_at FROM grade_records ORDER BY term_label DESC, course_name COLLATE NOCASE, attempt",
+            null
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val term = cursor.getString(3)
+                val institution = cursor.getString(2)
+                terms += term
+                if (institution.isNotBlank()) institutions += institution
+                val importedAt = cursor.getString(13)
+                if (updatedAt == null || importedAt > updatedAt!!) updatedAt = importedAt
+                records.put(
+                    JSONObject()
+                        .put("id", cursor.getString(0))
+                        .put("source", cursor.getString(1))
+                        .put("institution", institution)
+                        .put("term", term)
+                        .put("courseCode", cursor.getString(4))
+                        .put("courseName", cursor.getString(5))
+                        .put("courseType", cursor.getString(6))
+                        .put("credit", if (cursor.isNull(7)) JSONObject.NULL else cursor.getDouble(7))
+                        .put("scoreText", cursor.getString(8))
+                        .put("numericScore", if (cursor.isNull(9)) JSONObject.NULL else cursor.getDouble(9))
+                        .put("gradePoint", if (cursor.isNull(10)) JSONObject.NULL else cursor.getDouble(10))
+                        .put("elective", cursor.getInt(11) != 0)
+                        .put("attempt", cursor.getInt(12))
+                        .put("importedAt", importedAt)
+                )
+            }
+        }
+        JSONObject()
+            .put("records", records)
+            .put("terms", JSONArray(terms.toList()))
+            .put("institutions", JSONArray(institutions.toList()))
+            .put("updatedAt", updatedAt ?: JSONObject.NULL)
+    }
+
+    fun commitGradeBundle(bundle: JSONObject): JSONObject = synchronized(lock) {
+        val source = stringValue(bundle, "source").ifBlank { "教务成绩" }
+        val institution = stringValue(bundle, "institution")
+        val defaultTerm = stringValue(bundle, "termName").ifBlank { "未分组" }
+        val rows = bundle.optJSONArray("records") ?: JSONArray()
+        require(rows.length() > 0) { "没有可保存的成绩记录" }
+
+        val normalized = ArrayList<JSONObject>(rows.length())
+        val terms = linkedSetOf<String>()
+        for (index in 0 until rows.length()) {
+            val row = rows.optJSONObject(index) ?: continue
+            val courseName = stringValue(row, "courseName").ifBlank { stringValue(row, "name") }
+            if (courseName.isBlank()) continue
+            val term = stringValue(row, "term").ifBlank { defaultTerm }
+            terms += term
+            normalized += row.deepCopy().put("courseName", courseName).put("term", term)
+        }
+        require(normalized.isNotEmpty()) { "成绩记录缺少课程名称" }
+
+        var replacedCount = 0
+        db.beginTransaction()
+        try {
+            terms.forEach { term ->
+                replacedCount += db.rawQuery(
+                    "SELECT COUNT(*) FROM grade_records WHERE source=? AND institution=? AND term_label=?",
+                    arrayOf(source, institution, term)
+                ).use { cursor -> cursor.moveToFirst(); cursor.getInt(0) }
+                db.execSQL(
+                    "DELETE FROM grade_records WHERE source=? AND institution=? AND term_label=?",
+                    arrayOf(source, institution, term)
+                )
+            }
+
+            normalized.forEach { row ->
+                val courseType = stringValue(row, "courseType").ifBlank { stringValue(row, "type") }
+                val scoreText = stringValue(row, "scoreText").ifBlank { stringValue(row, "score") }
+                val numericScore = nullableDouble(row, "numericScore") ?: scoreText.toDoubleOrNull()
+                val credit = nullableDouble(row, "credit")?.takeIf { it >= 0.0 }
+                val gradePoint = nullableDouble(row, "gradePoint")?.takeIf { it >= 0.0 }
+                val elective = when {
+                    row.has("elective") && !row.isNull("elective") -> row.optBoolean("elective", false)
+                    else -> courseType.contains("选修") || courseType.contains("任选") || courseType.contains("限选") || courseType.contains("公选")
+                }
+                db.execSQL(
+                    "INSERT INTO grade_records(id, source, institution, term_label, course_code, course_name, course_type, credit, score_text, numeric_score, grade_point, elective, attempt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    arrayOf(
+                        UUID.randomUUID().toString(),
+                        source,
+                        institution,
+                        stringValue(row, "term"),
+                        stringValue(row, "courseCode").ifBlank { stringValue(row, "code") },
+                        stringValue(row, "courseName"),
+                        courseType,
+                        credit,
+                        scoreText,
+                        numericScore,
+                        gradePoint,
+                        if (elective) 1 else 0,
+                        row.optInt("attempt", 1).coerceIn(1, 20)
+                    )
+                )
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+
+        JSONObject()
+            .put("recordCount", normalized.size)
+            .put("termCount", terms.size)
+            .put("replacedCount", replacedCount)
     }
 
     fun saveScheduleCourse(input: JSONObject): String = synchronized(lock) {
@@ -596,6 +714,14 @@ class LumaDatabase(context: Context) : Closeable {
             keys.forEach { key -> slot.optString(key).trim().takeIf { it.isNotEmpty() }?.let { return it } }
         }
         return null
+    }
+
+    private fun nullableDouble(obj: JSONObject, key: String): Double? {
+        if (!obj.has(key) || obj.isNull(key)) return null
+        return when (val value = obj.opt(key)) {
+            is Number -> value.toDouble().takeIf { it.isFinite() }
+            else -> value?.toString()?.trim()?.toDoubleOrNull()?.takeIf { it.isFinite() }
+        }
     }
 
     private fun stringValue(obj: JSONObject, key: String): String {
