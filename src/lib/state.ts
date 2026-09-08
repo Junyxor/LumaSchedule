@@ -11,12 +11,14 @@ export const courses: Course[] = [
   { id: 'career', name: '大学生职业规划', teacher: '王老师', room: '教2-205', start: '18:30', end: '20:05', day: 5, color: 'orange', startSection: 10, endSection: 11, weeks: [1,3,5,7,9,11,13,15] }
 ];
 
+// Luma's reference material deliberately favors Apple's high-transparency,
+// bright-edge Liquid Glass look while keeping Android WebView blur moderate.
 export const defaultGlass: GlassSettings = {
-  blur: 32,
-  opacity: 58,
-  saturation: 158,
-  highlight: 78,
-  refraction: 56,
+  blur: 34,
+  opacity: 46,
+  saturation: 188,
+  highlight: 92,
+  refraction: 78,
   noise: 1,
   motion: true
 };
