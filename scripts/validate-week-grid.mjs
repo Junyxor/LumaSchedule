@@ -31,6 +31,7 @@ const activeRangeMarkers = [
   'const TIMELINE_PADDING_MINUTES = 30',
   'const MIN_TIMELINE_SPAN = 4 * 60',
   'function paddedTimelineRange(',
+  'const earliestAllowed = earliest >= DEFAULT_DAY_START',
   'visibleStartMinutes = visibleCourses.map((course) => courseStartMinute(course))',
   'visibleEndMinutes = visibleCourses.map((course) => courseEndMinute(course))',
   'timelineRange = paddedTimelineRange(earliestVisible, latestVisible, visibleCourses.length > 0)',
