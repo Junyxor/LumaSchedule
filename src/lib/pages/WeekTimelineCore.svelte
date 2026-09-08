@@ -29,6 +29,8 @@
   };
 
   const TIME_STEP_MINUTES = 5;
+  const TIMELINE_PADDING_MINUTES = 30;
+  const MIN_TIMELINE_SPAN = 4 * 60;
   const DEFAULT_DAY_START = 8 * 60;
   const DEFAULT_SECTION_LENGTH = 50;
   const DEFAULT_SECTION_STRIDE = 60;
@@ -54,9 +56,10 @@
   let dayCount = 5;
   let sectionCount = 12;
   let sections: number[] = [];
+  let timelineSections: number[] = [];
   let timelineStart = DEFAULT_DAY_START;
-  let timelineEnd = DEFAULT_DAY_START + 12 * 60;
-  let timelineRowCount = 144;
+  let timelineEnd = DEFAULT_DAY_START + MIN_TIMELINE_SPAN;
+  let timelineRowCount = MIN_TIMELINE_SPAN / TIME_STEP_MINUTES;
   let timelineGuides: number[] = [];
   let timelineHours: number[] = [];
 
@@ -176,6 +179,22 @@
     return Math.max(start + TIME_STEP_MINUTES, inferred);
   }
 
+  function paddedTimelineRange(earliest: number, latest: number, hasCourses: boolean) {
+    if (!hasCourses) return { start: DEFAULT_DAY_START, end: DEFAULT_DAY_START + MIN_TIMELINE_SPAN };
+
+    let start = Math.max(0, Math.floor((earliest - TIMELINE_PADDING_MINUTES) / 30) * 30);
+    let end = Math.min(24 * 60, Math.ceil((latest + TIMELINE_PADDING_MINUTES) / 30) * 30);
+
+    if (end - start < MIN_TIMELINE_SPAN) {
+      const center = (start + end) / 2;
+      start = Math.max(0, Math.floor((center - MIN_TIMELINE_SPAN / 2) / 30) * 30);
+      end = Math.min(24 * 60, start + MIN_TIMELINE_SPAN);
+      if (end - start < MIN_TIMELINE_SPAN) start = Math.max(0, end - MIN_TIMELINE_SPAN);
+    }
+
+    return { start, end };
+  }
+
   function timelineRow(minutes: number) {
     return Math.max(1, Math.floor((minutes - timelineStart) / TIME_STEP_MINUTES) + 1);
   }
@@ -189,7 +208,7 @@
   }
 
   function sectionMarkerRow(section: number) {
-    return timelineRow(Math.max(timelineStart, Math.min(timelineEnd, inferredSectionStart(section))));
+    return timelineRow(inferredSectionStart(section));
   }
 
   function columnFor(day: number) {
@@ -353,14 +372,21 @@
   $: visibleCourses = courses.filter((course) => visibleDayNumbers.includes(course.day));
   $: dayCount = visibleDayNumbers.length;
   $: timeReferenceCourses = timelineCourses.length ? timelineCourses : courses;
-  $: sectionCount = Math.max(preferences.defaultSections || 12, ...timeReferenceCourses.map((course) => course.endSection || 0));
+  $: sectionCount = visibleCourses.length
+    ? Math.max(1, ...visibleCourses.map((course) => course.endSection || course.startSection || 1))
+    : Math.max(1, preferences.defaultSections || 12);
   $: sections = Array.from({ length: sectionCount }, (_, i) => i + 1);
-  $: knownStarts = timeReferenceCourses.map((course) => parseClock(course.start)).filter((value): value is number => value !== null);
-  $: knownEnds = timeReferenceCourses.map((course) => parseClock(course.end)).filter((value): value is number => value !== null);
-  $: earliestKnown = knownStarts.length ? Math.min(...knownStarts) : DEFAULT_DAY_START;
-  $: latestKnown = knownEnds.length ? Math.max(...knownEnds) : inferredSectionEnd(sectionCount);
-  $: timelineStart = Math.floor(Math.min(DEFAULT_DAY_START, earliestKnown) / 30) * 30;
-  $: timelineEnd = Math.ceil(Math.max(latestKnown + 10, inferredSectionEnd(sectionCount)) / 30) * 30;
+  $: visibleStartMinutes = visibleCourses.map((course) => courseStartMinute(course));
+  $: visibleEndMinutes = visibleCourses.map((course) => courseEndMinute(course));
+  $: earliestVisible = visibleStartMinutes.length ? Math.min(...visibleStartMinutes) : DEFAULT_DAY_START;
+  $: latestVisible = visibleEndMinutes.length ? Math.max(...visibleEndMinutes) : DEFAULT_DAY_START + DEFAULT_SECTION_LENGTH;
+  $: timelineRange = paddedTimelineRange(earliestVisible, latestVisible, visibleCourses.length > 0);
+  $: timelineStart = timelineRange.start;
+  $: timelineEnd = timelineRange.end;
+  $: timelineSections = sections.filter((section) => {
+    const minute = inferredSectionStart(section);
+    return minute >= timelineStart && minute < timelineEnd;
+  });
   $: timelineRowCount = Math.max(1, Math.ceil((timelineEnd - timelineStart) / TIME_STEP_MINUTES));
   $: timelineGuides = Array.from(
     { length: Math.floor((timelineEnd - Math.ceil(timelineStart / 30) * 30) / 30) + 1 },
@@ -425,7 +451,7 @@
             </div>
           {/each}
         {:else}
-          {#each sections as section}
+          {#each timelineSections as section}
             <div class="time-label section-label" style={`grid-column:1;grid-row:${sectionMarkerRow(section)}`}>
               {section}
             </div>
