@@ -193,6 +193,10 @@ export function saveFullBackup() {
   return invokeNative<boolean>('export_full_backup_to_file', {}, 300_000);
 }
 
+export function saveDiagnosticLog() {
+  return invokeNative<boolean>('export_diagnostic_log_to_file', {}, 300_000);
+}
+
 export function restoreFullBackupFromFile() {
   return invokeNative<BackupSummary | null>('restore_full_backup_from_file', {}, 300_000);
 }

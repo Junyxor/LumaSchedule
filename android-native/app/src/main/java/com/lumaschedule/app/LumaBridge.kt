@@ -47,13 +47,28 @@ class LumaBridge(
     fun request(id: String, command: String, payload: String?) {
         if (id.length > 80 || command.length > 80) return
         executor.execute {
+            val started = SystemClock.elapsedRealtime()
             runCatching { route(command, payload.orEmpty()) }
-                .onSuccess { resolve(id, true, it) }
-                .onFailure {
+                .onSuccess { result ->
+                    DiagnosticLog.record(
+                        activity,
+                        "INFO",
+                        "bridge.$command",
+                        "ok durationMs=${SystemClock.elapsedRealtime() - started}"
+                    )
+                    resolve(id, true, result)
+                }
+                .onFailure { error ->
+                    DiagnosticLog.record(
+                        activity,
+                        "ERROR",
+                        "bridge.$command",
+                        "${error.javaClass.simpleName}: ${error.message.orEmpty()} durationMs=${SystemClock.elapsedRealtime() - started}"
+                    )
                     resolve(
                         id,
                         false,
-                        JSONObject().put("message", it.message ?: "Native command failed").toString()
+                        JSONObject().put("message", error.message ?: "Native command failed").toString()
                     )
                 }
         }
@@ -61,6 +76,7 @@ class LumaBridge(
 
     fun markUiReady() {
         uiReadyMs = SystemClock.elapsedRealtime() - launchStarted
+        DiagnosticLog.record(activity, "INFO", "ui.ready", "startupMs=$uiReadyMs")
         activity.runOnUiThread {
             webView.evaluateJavascript(
                 "window.dispatchEvent(new CustomEvent('luma-native-ready',{detail:{startupMs:$uiReadyMs}}));",
@@ -265,6 +281,12 @@ class LumaBridge(
                 transfer.exportFullBackup(BuildConfig.VERSION_NAME)
             ).toString()
 
+            "export_diagnostic_log_to_file" -> saveTextDocument(
+                "text/plain",
+                DiagnosticLog.suggestedFileName(),
+                buildDiagnosticReport()
+            ).toString()
+
             "restore_full_backup_from_file" -> {
                 val uri = activity.openDocumentBlocking(
                     arrayOf("application/json", "application/octet-stream", "text/plain")
@@ -318,6 +340,21 @@ class LumaBridge(
 
             else -> error("Native command not implemented yet: $command")
         }
+    }
+
+    private fun buildDiagnosticReport(): String {
+        val schedule = runCatching { database.getScheduleSnapshot() }.getOrNull()
+        val grades = runCatching { database.getGradeSnapshot() }.getOrNull()
+        val reminderEnabled = database.getSettingRaw("reminders.course.default")
+            ?.let { runCatching { JSONObject(it).optBoolean("enabled", false) }.getOrDefault(false) }
+            ?: false
+        val summary = JSONObject()
+            .put("databaseReady", true)
+            .put("hasSchedule", schedule?.optBoolean("hasSchedule", false) ?: false)
+            .put("courseCount", schedule?.optJSONArray("courses")?.length() ?: -1)
+            .put("gradeRecordCount", grades?.optJSONArray("records")?.length() ?: -1)
+            .put("reminderEnabled", reminderEnabled)
+        return DiagnosticLog.buildReport(activity, BuildConfig.VERSION_NAME, uiReadyMs, summary)
     }
 
     private fun courseCreditIndex(): JSONObject = database.getSettingRaw(COURSE_CREDIT_INDEX_KEY)
