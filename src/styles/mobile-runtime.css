@@ -15,4 +15,9 @@
   .page {
     padding-bottom: calc(100px + env(safe-area-inset-bottom));
   }
+
+  /* Boundary guides may address the final grid line; implicit tracks must never add a blank tail. */
+  .page-week .week-time-grid {
+    grid-auto-rows: 0;
+  }
 }
