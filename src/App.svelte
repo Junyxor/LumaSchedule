@@ -6,13 +6,27 @@
   import ImportCenter from './lib/pages/ImportCenter.svelte';
   import Widgets from './lib/pages/Widgets.svelte';
   import Settings from './lib/pages/Settings.svelte';
-  import type { Course, GlassSettings, PageId, ScheduleSnapshot } from './lib/types';
+  import type { Course, GlassSettings, PageId, SchedulePreferences, ScheduleSnapshot } from './lib/types';
   import { defaultGlass } from './lib/state';
-  import { getBootstrap, getScheduleSnapshot, publishWidgetSnapshot, syncCourseReminders } from './lib/tauri';
+  import { getBootstrap, getSchedulePreferences, getScheduleSnapshot, publishWidgetSnapshot, syncCourseReminders } from './lib/tauri';
 
   let page: PageId = 'today';
   let glass: GlassSettings = { ...defaultGlass };
   let scheduleSnapshot: ScheduleSnapshot = { courses: [], hasSchedule: false };
+  let schedulePreferences: SchedulePreferences = {
+    hasSchedule: false,
+    termName: '',
+    termStart: '',
+    weekCount: 20,
+    timezone: 'Asia/Shanghai',
+    weekStartsOn: 1,
+    showWeekend: true,
+    showTeacher: true,
+    showRoom: true,
+    showTime: true,
+    compactMode: false,
+    defaultSections: 12
+  };
   let runtimeCourses: Course[] = [];
   let liveData = false;
   let runtimeReady = false;
@@ -79,10 +93,11 @@
 
   async function loadRuntimeData() {
     try {
-      const [bootstrap, snapshot] = await Promise.all([getBootstrap(), getScheduleSnapshot()]);
+      const [bootstrap, snapshot, preferences] = await Promise.all([getBootstrap(), getScheduleSnapshot(), getSchedulePreferences()]);
       const localGlass = readLocalGlass();
       glass = localGlass ?? (bootstrap.glassSettings ? { ...defaultGlass, ...bootstrap.glassSettings } : { ...defaultGlass });
       scheduleSnapshot = snapshot;
+      schedulePreferences = preferences;
       runtimeCourses = snapshot.courses;
       liveData = bootstrap.dbReady;
     } catch {
@@ -135,15 +150,15 @@
   </aside>
   <main class="main-stage">
     {#if page === 'today'}
-      <Today courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} />
+      <Today courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} preferences={schedulePreferences} />
     {:else if page === 'week'}
-      <Week courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} on:changed={loadRuntimeData} />
+      <Week courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} preferences={schedulePreferences} on:changed={loadRuntimeData} />
     {:else if page === 'import'}
       <ImportCenter on:imported={loadRuntimeData} />
     {:else if page === 'widgets'}
       <Widgets />
     {:else}
-      <Settings bind:glass />
+      <Settings bind:glass preferences={schedulePreferences} on:changed={loadRuntimeData} />
     {/if}
   </main>
   <nav class="mobile-nav glass-panel" aria-label="主导航">{#each nav as item}<button class:active={page === item.id} on:click={() => (page = item.id)} aria-label={item.label}><svelte:component this={item.icon} size={20} strokeWidth={1.8} /><span>{item.label}</span></button>{/each}</nav>
