@@ -109,12 +109,16 @@
     box-shadow: 0 10px 28px rgba(54, 58, 84, .04), inset 0 1px rgba(255, 255, 255, .54) !important;
   }
 
+  /* Header and body must use the exact same columns. Older mobile CSS hard-coded
+     a 34px axis and padded the scrolling body by another 34px, which shifted every
+     time label and course card to the right of its weekday header. */
   .page-week .week-board .week-header {
     position: relative !important;
     top: auto !important;
     z-index: 12;
     flex: 0 0 50px !important;
     height: 50px !important;
+    grid-template-columns: var(--axis-width) repeat(var(--day-count), minmax(0, 1fr)) !important;
     border-radius: 17px 17px 0 0;
     background: rgba(250, 250, 253, .94) !important;
     -webkit-backdrop-filter: blur(18px) saturate(145%);
@@ -153,8 +157,13 @@
   .page-week .week-board .week-scroll {
     position: relative !important;
     flex: 1 1 auto !important;
+    width: 100% !important;
     height: auto !important;
     min-height: 0 !important;
+    box-sizing: border-box !important;
+    padding: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
     overflow-x: hidden !important;
     overflow-y: auto !important;
     overscroll-behavior: contain !important;
@@ -163,6 +172,8 @@
   .page-week .week-board .week-scroll::-webkit-scrollbar { display: none; }
 
   .page-week .week-time-grid {
+    width: 100% !important;
+    grid-template-columns: var(--axis-width) repeat(var(--day-count), minmax(0, 1fr)) !important;
     grid-template-rows: repeat(var(--time-row-count), var(--time-step-height)) !important;
     grid-auto-rows: 0 !important;
     min-height: calc(var(--time-row-count) * var(--time-step-height)) !important;
@@ -172,8 +183,8 @@
     background: linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.055)) !important;
   }
 
-  /* Only real hours are shown. Labels sit below the rule instead of being translated
-     into the weekday header, which was the visible 08:00/07 collision on Android. */
+  /* Only real hours are shown. The label is centred in the same axis column as the
+     header's “时间”, so the left rail cannot visually drift even on narrow screens. */
   .page-week .time-guide {
     z-index: 0 !important;
     border-top-color: rgba(77, 82, 102, .065) !important;
@@ -182,9 +193,10 @@
   .page-week .time-label {
     z-index: 4 !important;
     align-self: start !important;
+    justify-self: stretch !important;
     transform: translateY(5px) !important;
-    padding-right: 7px !important;
-    text-align: right !important;
+    padding: 0 !important;
+    text-align: center !important;
     font-size: 9.5px !important;
     line-height: 1 !important;
     font-weight: 690 !important;
@@ -291,6 +303,6 @@
   .page-week .week-board { --axis-width: 42px !important; }
   .page-week .week-board .week-header > div span { font-size: 9.5px !important; }
   .page-week .week-board .week-header > div b { font-size: 12.5px !important; }
-  .page-week .time-label { font-size: 9px !important; padding-right: 6px !important; }
+  .page-week .time-label { font-size: 9px !important; }
   .page-week .week-time-grid .week-course b { font-size: 8.8px !important; line-height: 1.04 !important; }
 }
