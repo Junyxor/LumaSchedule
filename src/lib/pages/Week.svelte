@@ -1,23 +1,28 @@
 <script lang="ts">
-  import { confirm } from '@tauri-apps/plugin-dialog';
   import { Plus, Trash2, X } from 'lucide-svelte';
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
+  import ConfirmSheet from '../components/ConfirmSheet.svelte';
   import { deleteScheduleCourse, saveScheduleCourse } from '../tauri';
-  import type { Course, CourseMutation } from '../types';
+  import type { Course, CourseMutation, SchedulePreferences } from '../types';
 
   export let courses: Course[];
   export let hasSchedule = false;
   export let currentWeek: number | null | undefined = null;
   export let termName: string | null | undefined = null;
+  export let preferences: SchedulePreferences = {
+    hasSchedule: false, termName: '', termStart: '', weekCount: 20, timezone: 'Asia/Shanghai', weekStartsOn: 1,
+    showWeekend: true, showTeacher: true, showRoom: true, showTime: true, compactMode: false, defaultSections: 12
+  };
 
   const dispatch = createEventDispatcher<{ changed: void }>();
   const weekdayNames = ['周一','周二','周三','周四','周五','周六','周日'];
-  const sectionOptions = Array.from({ length: 20 }, (_, index) => index + 1);
+  const sectionOptions = Array.from({ length: 30 }, (_, index) => index + 1);
   let now = new Date();
   let timer: ReturnType<typeof setInterval> | null = null;
   let editorOpen = false;
   let editorBusy = false;
   let editorError = '';
+  let deleteConfirmOpen = false;
   let weeksText = '1-20';
   let draft: CourseMutation = blankDraft();
 
@@ -32,7 +37,7 @@
       endSection: 2,
       start: '',
       end: '',
-      weeks: Array.from({ length: 20 }, (_, index) => index + 1)
+      weeks: Array.from({ length: preferences.weekCount || 20 }, (_, index) => index + 1)
     };
   }
 
@@ -45,17 +50,17 @@
       item.setDate(monday.getDate() + index);
       return { label, date: String(item.getDate()).padStart(2, '0') };
     });
-    const sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
+    const last = new Date(monday);
+    last.setDate(monday.getDate() + (preferences.showWeekend ? 6 : 4));
     return {
       days,
       todayIndex: ((date.getDay() + 6) % 7),
-      rangeLabel: `${monday.getMonth() + 1}月${monday.getDate()}日 – ${sunday.getMonth() + 1}月${sunday.getDate()}日`
+      rangeLabel: `${monday.getMonth() + 1}月${monday.getDate()}日 – ${last.getMonth() + 1}月${last.getDate()}日`
     };
   }
 
   function weeksToText(weeks: number[]) {
-    if (!weeks.length) return '1-20';
+    if (!weeks.length) return `1-${preferences.weekCount || 20}`;
     const sorted = [...new Set(weeks)].sort((a, b) => a - b);
     const parts: string[] = [];
     let start = sorted[0];
@@ -87,9 +92,13 @@
     return [...result].sort((a, b) => a - b);
   }
 
+  function courseMeta(course: Course) {
+    return [preferences.showRoom ? course.room : '', preferences.showTeacher ? course.teacher : ''].filter(Boolean).join(' · ');
+  }
+
   function newCourse() {
     draft = blankDraft();
-    weeksText = '1-20';
+    weeksText = `1-${preferences.weekCount || 20}`;
     editorError = '';
     editorOpen = true;
   }
@@ -130,14 +139,17 @@
     }
   }
 
-  async function removeEditorCourse() {
+  function requestDelete() {
+    if (draft.id && !editorBusy) deleteConfirmOpen = true;
+  }
+
+  async function confirmDelete() {
     if (!draft.id || editorBusy) return;
-    const approved = await confirm('只删除当前这个上课时段。若同一门课还有其他时段，它们会继续保留。', { title: '删除课程时段', kind: 'warning' });
-    if (!approved) return;
     editorBusy = true;
     editorError = '';
     try {
       await deleteScheduleCourse(draft.id);
+      deleteConfirmOpen = false;
       editorOpen = false;
       dispatch('changed');
     } catch (error) {
@@ -151,10 +163,14 @@
   onDestroy(() => { if (timer) clearInterval(timer); });
 
   $: context = weekContext(now);
-  $: sectionCount = Math.max(12, ...courses.map((course) => course.endSection || 0));
+  $: visibleDays = preferences.showWeekend ? context.days : context.days.slice(0, 5);
+  $: visibleCourses = preferences.showWeekend ? courses : courses.filter((course) => course.day <= 5);
+  $: dayCount = preferences.showWeekend ? 7 : 5;
+  $: sectionCount = Math.max(preferences.defaultSections || 12, ...visibleCourses.map((course) => course.endSection || 0));
   $: sections = Array.from({ length: sectionCount }, (_, i) => i + 1);
+  $: rowHeight = preferences.compactMode ? 54 : 65;
   $: title = currentWeek ? `第 ${currentWeek} 周` : '本周课表';
-  $: subtitle = [termName, courses.length ? `${courses.length} 个课程时段` : hasSchedule ? '当前周暂无课程' : '还没有课表'].filter(Boolean).join(' · ');
+  $: subtitle = [termName, visibleCourses.length ? `${visibleCourses.length} 个课程时段` : hasSchedule ? '当前周暂无课程' : '还没有课表'].filter(Boolean).join(' · ');
 </script>
 
 <section class="page page-week">
@@ -167,22 +183,22 @@
     <button class="week-add glass-panel" on:click={newCourse} aria-label="新增课程"><Plus size={22} strokeWidth={1.9} /></button>
   </header>
 
-  <div class="week-board content-surface" style={`--section-count:${sectionCount}`}>
+  <div class="week-board content-surface" class:compact={preferences.compactMode} style={`--section-count:${sectionCount};--day-count:${dayCount};--row-height:${rowHeight}px`}>
     <div class="week-header">
       <div class="corner">节</div>
-      {#each context.days as day, i}<div class:today={i === context.todayIndex}><span>{day.label}</span><b>{day.date}</b></div>{/each}
+      {#each visibleDays as day, i}<div class:today={i === context.todayIndex}><span>{day.label}</span><b>{day.date}</b></div>{/each}
     </div>
     <div class="week-scroll">
       <div class="section-column">{#each sections as n}<div><b>{n}</b></div>{/each}</div>
-      <div class="week-gridlines">{#each Array(7) as _}<div></div>{/each}</div>
-      {#each courses as course}
+      <div class="week-gridlines">{#each Array(dayCount) as _}<div></div>{/each}</div>
+      {#each visibleCourses as course}
         <button class="week-course {course.color}" style={`--day:${course.day};--start:${course.startSection};--span:${course.endSection - course.startSection + 1}`} aria-label={`编辑 ${course.name}`} on:click={() => editCourse(course)}>
           <b>{course.name}</b>
-          <span>{course.room || ''}</span>
-          {#if course.start}<small>{course.start}</small>{/if}
+          {#if courseMeta(course)}<span>{courseMeta(course)}</span>{/if}
+          {#if preferences.showTime && course.start}<small>{course.start}{course.end ? `–${course.end}` : ''}</small>{/if}
         </button>
       {/each}
-      {#if !courses.length}<div class="week-empty">{hasSchedule ? '当前周没有课程。点右上角 + 可以手动添加。' : '还没有课表。你可以导入教务课表，也可以点右上角 + 手动添加。'}</div>{/if}
+      {#if !visibleCourses.length}<div class="week-empty">{hasSchedule ? '当前周没有课程。点右上角 + 可以手动添加。' : '还没有课表。你可以导入教务课表，也可以点右上角 + 手动添加。'}</div>{/if}
     </div>
   </div>
 </section>
@@ -210,45 +226,36 @@
 
       {#if editorError}<div class="editor-error">{editorError}</div>{/if}
       <footer class="editor-actions">
-        {#if draft.id}<button class="delete-course" on:click={removeEditorCourse} disabled={editorBusy}><Trash2 size={16} /> 删除此时段</button>{/if}
+        {#if draft.id}<button class="delete-course" on:click={requestDelete} disabled={editorBusy}><Trash2 size={16} /> 删除此时段</button>{/if}
         <button class="save-course" on:click={saveEditor} disabled={editorBusy}>{editorBusy ? '正在保存…' : '保存'}</button>
       </footer>
     </div>
   </div>
 {/if}
 
+<ConfirmSheet
+  open={deleteConfirmOpen}
+  title="删除课程时段"
+  message="只删除当前这个上课时段。若同一门课还有其他时段，它们会继续保留。"
+  confirmText="删除"
+  danger
+  busy={editorBusy}
+  on:cancel={() => (deleteConfirmOpen = false)}
+  on:confirm={confirmDelete}
+/>
+
 <style>
   .week-topbar { align-items: center; }
-  .week-add {
-    width: 46px;
-    height: 46px;
-    border-radius: 23px;
-    border: 0;
-    display: grid;
-    place-items: center;
-    color: #5b56d6;
-    flex: none;
-  }
-  .week-course { border: 0; text-align: left; font: inherit; cursor: pointer; }
-  .course-editor-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 120;
-    display: flex;
-    align-items: flex-end;
-    justify-content: center;
-    background: rgba(18,18,24,.22);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-  }
-  .course-editor {
-    position: relative;
-    width: min(620px, 100%);
-    max-height: min(88dvh, 760px);
-    overflow: auto;
-    border-radius: 30px 30px 0 0;
-    padding: 8px 18px calc(20px + env(safe-area-inset-bottom));
-  }
+  .week-add { width: 46px; height: 46px; border-radius: 23px; border: 0; display: grid; place-items: center; color: #5b56d6; flex: none; }
+  .week-board .week-header { grid-template-columns: 54px repeat(var(--day-count), 1fr); }
+  .week-board .section-column { height: calc(var(--section-count) * var(--row-height)); grid-template-rows: repeat(var(--section-count), var(--row-height)); }
+  .week-board .week-gridlines { height: calc(var(--section-count) * var(--row-height)); grid-template-columns: repeat(var(--day-count), 1fr); background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--row-height) - 1px), rgba(77,82,102,.055) calc(var(--row-height) - 1px), rgba(77,82,102,.055) var(--row-height)); }
+  .week-board .week-course { left: calc(54px + (var(--day) - 1) * ((100% - 54px) / var(--day-count)) + 5px); top: calc((var(--start) - 1) * var(--row-height) + 5px); width: calc((100% - 54px) / var(--day-count) - 10px); height: calc(var(--span) * var(--row-height) - 10px); border: 0; text-align: left; font: inherit; cursor: pointer; }
+  .week-board.compact .week-course { padding: 7px 8px; border-radius: 11px; }
+  .week-board.compact .week-course b { font-size: 9px; }
+  .week-board.compact .week-course span, .week-board.compact .week-course small { margin-top: 2px; }
+  .course-editor-backdrop { position: fixed; inset: 0; z-index: 120; display: flex; align-items: flex-end; justify-content: center; background: rgba(18,18,24,.22); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+  .course-editor { position: relative; width: min(620px, 100%); max-height: min(88dvh, 760px); overflow: auto; border-radius: 30px 30px 0 0; padding: 8px 18px calc(20px + env(safe-area-inset-bottom)); }
   .editor-grabber { width: 38px; height: 5px; border-radius: 999px; background: rgba(60,60,67,.22); margin: 0 auto 10px; }
   .editor-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
   .editor-head > div { flex: 1; min-width: 0; }
@@ -259,16 +266,7 @@
   .editor-form label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .editor-form label.wide { grid-column: 1 / -1; }
   .editor-form label > span { font-size: 11px; color: rgba(60,60,67,.62); padding-left: 4px; }
-  .editor-form input, .editor-form select {
-    width: 100%;
-    min-height: 46px;
-    border: 1px solid rgba(60,60,67,.08);
-    border-radius: 14px;
-    background: rgba(118,118,128,.09);
-    color: #111114;
-    padding: 0 13px;
-    outline: none;
-  }
+  .editor-form input, .editor-form select { width: 100%; min-height: 46px; border: 1px solid rgba(60,60,67,.08); border-radius: 14px; background: rgba(118,118,128,.09); color: #111114; padding: 0 13px; outline: none; }
   .editor-form input:focus, .editor-form select:focus { border-color: rgba(91,86,214,.35); background: rgba(255,255,255,.46); }
   .editor-form small { font-size: 10px; color: rgba(60,60,67,.48); padding-left: 4px; }
   .editor-error { margin-top: 12px; border-radius: 14px; padding: 11px 13px; font-size: 12px; color: #b34f5b; background: rgba(220,70,84,.08); }
@@ -277,9 +275,5 @@
   .delete-course { padding: 0 14px; display: inline-flex; align-items: center; gap: 7px; color: #c44d5e; background: rgba(220,70,84,.09); }
   .save-course { margin-left: auto; min-width: 118px; padding: 0 22px; color: white; background: #5b56d6; box-shadow: 0 9px 20px rgba(91,86,214,.22); }
   .editor-actions button:disabled { opacity: .55; }
-
-  @media (min-width: 761px) {
-    .course-editor-backdrop { align-items: center; padding: 24px; }
-    .course-editor { border-radius: 30px; }
-  }
+  @media (min-width: 761px) { .course-editor-backdrop { align-items: center; padding: 24px; } .course-editor { border-radius: 30px; } }
 </style>
