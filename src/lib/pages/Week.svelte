@@ -88,6 +88,10 @@
     startY = event.clientY;
   }
 
+  function cancelSwipe() {
+    pointerId = null;
+  }
+
   function endSwipe(event: PointerEvent) {
     if (event.pointerId !== pointerId) return;
     pointerId = null;
@@ -137,18 +141,24 @@
       <div class="week-title-line"><h1>第 {selectedWeek} 周</h1>{#if selectedWeek === currentTeachingWeek}<span>本周</span>{/if}</div>
       <p>{fullTermName || (fullTermStart ? '当前学期' : '尚未设置学期')} · {weekCourses.length ? `${weekCourses.length} 个课程时段` : '暂无课程'}</p>
     </div>
-    <div class="week-stepper glass-panel" aria-label="切换教学周">
-      <button on:click={() => selectWeek(selectedWeek - 1)} disabled={selectedWeek <= 1} aria-label="上一周"><ChevronLeft size={19}/></button>
-      <label>
-        <b>第 {selectedWeek} 周</b>
-        <small>{shortDate(selectedWeekStart)}</small>
-        <select value={selectedWeek} on:change={(event) => selectWeek(Number(event.currentTarget.value))} aria-label="跳转到指定周">
-          {#each weekOptions as week}<option value={week}>第 {week} 周</option>{/each}
-        </select>
-      </label>
-      <button on:click={() => selectWeek(selectedWeek + 1)} disabled={selectedWeek >= fullWeekCount} aria-label="下一周"><ChevronRight size={19}/></button>
-    </div>
   </header>
+
+  <div class="week-switchbar glass-panel" aria-label="一键切换教学周">
+    <button class="week-switch previous" on:click={() => selectWeek(selectedWeek - 1)} disabled={selectedWeek <= 1} aria-label="上一周">
+      <ChevronLeft size={19}/>
+      <span><small>上一周</small><b>{selectedWeek > 1 ? `第 ${selectedWeek - 1} 周` : '已经是首周'}</b></span>
+    </button>
+    <label class="week-jump">
+      <span><b>第 {selectedWeek} 周</b><small>{shortDate(selectedWeekStart)} · 点这里跳周</small></span>
+      <select value={selectedWeek} on:change={(event) => selectWeek(Number(event.currentTarget.value))} aria-label="直接跳转到指定周">
+        {#each weekOptions as week}<option value={week}>第 {week} 周 · {shortDate(weekStart(week))}</option>{/each}
+      </select>
+    </label>
+    <button class="week-switch next" on:click={() => selectWeek(selectedWeek + 1)} disabled={selectedWeek >= fullWeekCount} aria-label="下一周">
+      <span><small>下一周</small><b>{selectedWeek < fullWeekCount ? `第 ${selectedWeek + 1} 周` : '已经是末周'}</b></span>
+      <ChevronRight size={19}/>
+    </button>
+  </div>
 
   <div class="week-strip glass-panel" aria-label="附近教学周">
     {#each chipWeeks as week}
@@ -165,7 +175,7 @@
     </button>
   {/if}
 
-  <div class="week-board-swipe" on:pointerdown={beginSwipe} on:pointerup={endSwipe}>
+  <div class="week-board-swipe" on:pointerdown={beginSwipe} on:pointerup={endSwipe} on:pointercancel={cancelSwipe}>
     <WeekCore
       courses={weekCourses}
       hasSchedule={fullHasSchedule}
@@ -190,13 +200,17 @@
   .week-title-line h1 { margin:0; font-size:38px; line-height:1; letter-spacing:-.055em; }
   .week-title-line span { padding:4px 8px; border-radius:999px; background:rgba(91,86,214,.11); color:#5751c9; font-size:10px; font-weight:700; }
   .week-heading p { margin:7px 0 0; color:rgba(60,60,67,.54); font-size:12px; }
-  .week-stepper { flex:none; min-height:52px; padding:5px; border-radius:18px; display:grid; grid-template-columns:40px minmax(82px,1fr) 40px; align-items:center; gap:4px; }
-  .week-stepper > button { width:40px; height:40px; border:0; border-radius:13px; display:grid; place-items:center; background:rgba(118,118,128,.07); color:#5751c9; }
-  .week-stepper > button:disabled { opacity:.25; }
-  .week-stepper label { position:relative; min-width:84px; text-align:center; display:grid; gap:1px; }
-  .week-stepper b { font-size:12px; }
-  .week-stepper small { font-size:9px; color:rgba(60,60,67,.48); }
-  .week-stepper select { position:absolute; inset:0; opacity:0; width:100%; height:100%; }
+  .week-switchbar { position:sticky; top:8px; z-index:18; display:grid; grid-template-columns:minmax(112px,1fr) minmax(126px,1.05fr) minmax(112px,1fr); gap:6px; padding:6px; border-radius:20px; }
+  .week-switchbar button,.week-jump { min-width:0; min-height:50px; border:0; border-radius:15px; color:inherit; }
+  .week-switch { display:flex; align-items:center; gap:7px; padding:0 11px; background:rgba(118,118,128,.07); }
+  .week-switch.next { justify-content:flex-end; text-align:right; }
+  .week-switch span,.week-jump > span { min-width:0; display:grid; gap:1px; }
+  .week-switch small,.week-jump small { color:rgba(60,60,67,.48); font-size:9px; font-weight:500; }
+  .week-switch b,.week-jump b { font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .week-switch > svg { flex:none; color:#5751c9; }
+  .week-switch:disabled { opacity:.30; }
+  .week-jump { position:relative; display:grid; place-items:center; text-align:center; background:rgba(91,86,214,.11); color:#514bd0; cursor:pointer; }
+  .week-jump select { position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; }
   .week-strip { display:flex; gap:6px; padding:6px; border-radius:18px; overflow-x:auto; scrollbar-width:none; }
   .week-strip::-webkit-scrollbar { display:none; }
   .week-strip button { flex:0 0 auto; min-width:70px; min-height:44px; border:0; border-radius:13px; background:transparent; color:inherit; display:grid; place-content:center; gap:1px; }
@@ -217,10 +231,14 @@
     .week-shell { gap:10px; }
     .week-page-head { align-items:center; gap:10px; }
     .week-title-line h1 { font-size:34px; }
-    .week-heading p { max-width:220px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .week-stepper { min-height:48px; grid-template-columns:36px 68px 36px; border-radius:17px; }
-    .week-stepper > button { width:36px; height:36px; }
-    .week-stepper label { min-width:68px; }
+    .week-heading p { max-width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .week-switchbar { top:calc(env(safe-area-inset-top) + 4px); grid-template-columns:1fr 1.05fr 1fr; gap:5px; padding:5px; border-radius:18px; }
+    .week-switchbar button,.week-jump { min-height:48px; border-radius:14px; }
+    .week-switch { gap:4px; padding:0 7px; }
+    .week-switch small { font-size:8px; }
+    .week-switch b { font-size:10px; }
+    .week-jump b { font-size:11px; }
+    .week-jump small { font-size:8px; }
     .week-strip { margin-top:-2px; }
   }
 </style>

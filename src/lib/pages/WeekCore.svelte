@@ -26,6 +26,7 @@
   let editorError = '';
   let deleteConfirmOpen = false;
   let weeksText = '1-20';
+  let creditText = '';
   let draft: CourseMutation = blankDraft();
 
   function blankDraft(): CourseMutation {
@@ -34,6 +35,7 @@
       name: '',
       teacher: '',
       room: '',
+      credit: null,
       day: ((new Date().getDay() + 6) % 7) + 1,
       startSection: 1,
       endSection: 2,
@@ -131,6 +133,7 @@
   function newCourse() {
     draft = blankDraft();
     weeksText = `1-${preferences.weekCount || 20}`;
+    creditText = '';
     editorError = '';
     editorOpen = true;
   }
@@ -141,6 +144,7 @@
       name: course.name,
       teacher: course.teacher,
       room: course.room,
+      credit: course.credit ?? null,
       day: course.day,
       startSection: course.startSection,
       endSection: course.endSection,
@@ -149,6 +153,7 @@
       weeks: [...course.weeks]
     };
     weeksText = weeksToText(course.weeks);
+    creditText = course.credit == null ? '' : String(course.credit);
     editorError = '';
     editorOpen = true;
   }
@@ -159,9 +164,21 @@
     if (draft.endSection < draft.startSection) { editorError = '结束节次不能早于开始节次。'; return; }
     const weeks = parseWeeks(weeksText);
     if (!weeks.length) { editorError = '请输入有效周次，例如 1-16 或 1,3,5,7。'; return; }
+    const credit = creditText.trim() ? Number(creditText.trim()) : null;
+    if (credit !== null && (!Number.isFinite(credit) || credit < 0 || credit > 30)) {
+      editorError = '学分请输入 0–30 之间的数字，例如 3 或 2.5。';
+      return;
+    }
     editorBusy = true;
     try {
-      await saveScheduleCourse({ ...draft, name: draft.name.trim(), teacher: draft.teacher.trim(), room: draft.room.trim(), weeks });
+      await saveScheduleCourse({
+        ...draft,
+        name: draft.name.trim(),
+        teacher: draft.teacher.trim(),
+        room: draft.room.trim(),
+        credit,
+        weeks
+      });
       editorOpen = false;
       dispatch('changed');
     } catch (error) {
@@ -247,7 +264,6 @@
 {#if editorOpen}
   <div class="course-editor-backdrop" role="presentation" on:click={(event) => { if (event.currentTarget === event.target && !editorBusy) editorOpen = false; }}>
     <div class="course-editor glass-panel refract" role="dialog" aria-modal="true" aria-label={draft.id ? '编辑课程' : '新增课程'}>
-      <div class="editor-grabber" aria-hidden="true"></div>
       <header class="editor-head">
         <div><span>{draft.id ? '编辑课程时段' : '手动添加'}</span><h2>{draft.id ? draft.name || '课程' : '新增课程'}</h2></div>
         <button on:click={() => (editorOpen = false)} disabled={editorBusy} aria-label="关闭"><X size={19} /></button>
@@ -257,12 +273,13 @@
         <label class="wide"><span>课程名称</span><input bind:value={draft.name} placeholder="例如 高等数学" /></label>
         <label><span>老师</span><input bind:value={draft.teacher} placeholder="可选" /></label>
         <label><span>教室</span><input bind:value={draft.room} placeholder="可选" /></label>
+        <label><span>学分</span><input bind:value={creditText} inputmode="decimal" placeholder="例如 3.0" /></label>
         <label><span>星期</span><select bind:value={draft.day}>{#each weekdayNames as label, index}<option value={index + 1}>{label}</option>{/each}</select></label>
         <label><span>开始节次</span><select bind:value={draft.startSection}>{#each sectionOptions as section}<option value={section}>第 {section} 节</option>{/each}</select></label>
         <label><span>结束节次</span><select bind:value={draft.endSection}>{#each sectionOptions as section}<option value={section}>第 {section} 节</option>{/each}</select></label>
         <label><span>开始时间</span><input type="time" bind:value={draft.start} /></label>
         <label><span>结束时间</span><input type="time" bind:value={draft.end} /></label>
-        <label class="wide"><span>上课周次</span><input bind:value={weeksText} placeholder="1-16,18,20" /><small>支持 1-16、1,3,5,7、1-8,10-16</small></label>
+        <label class="wide"><span>上课周次</span><input bind:value={weeksText} placeholder="1-16,18,20" /><small>支持 1-16、1,3,5,7、1-8,10-16。学分会用于同名成绩缺少学分时自动匹配。</small></label>
       </div>
 
       {#if editorError}<div class="editor-error">{editorError}</div>{/if}
@@ -297,21 +314,20 @@
   .week-board.compact .week-course { padding:7px 8px; border-radius:11px; }
   .week-board.compact .week-course b { font-size:9px; }
   .week-board.compact .week-course span,.week-board.compact .week-course small { margin-top:2px; }
-  .course-editor-backdrop { position:fixed; inset:0; z-index:120; display:flex; align-items:flex-end; justify-content:center; background:rgba(18,18,24,.22); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); }
-  .course-editor { position:relative; width:min(620px,100%); max-height:min(88dvh,760px); overflow:auto; border-radius:30px 30px 0 0; padding:8px 18px calc(20px + env(safe-area-inset-bottom)); }
-  .editor-grabber { width:38px; height:5px; border-radius:999px; background:rgba(60,60,67,.22); margin:0 auto 10px; }
+  .course-editor-backdrop { position:fixed; inset:0; z-index:120; display:flex; align-items:flex-end; justify-content:center; overflow:hidden; background:rgba(18,18,24,.22); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); }
+  .course-editor { position:relative; box-sizing:border-box; width:min(620px,100vw); max-width:100vw; max-height:min(88dvh,760px); overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; touch-action:pan-y; border-radius:30px 30px 0 0; padding:14px 18px calc(20px + env(safe-area-inset-bottom)); }
   .editor-head { display:flex; align-items:center; gap:14px; margin-bottom:16px; }
   .editor-head > div { flex:1; min-width:0; }
   .editor-head span { font-size:11px; color:rgba(60,60,67,.56); }
   .editor-head h2 { margin:2px 0 0; font-size:23px; line-height:1.12; letter-spacing:-.035em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .editor-head button { width:38px; height:38px; border:0; border-radius:19px; background:rgba(118,118,128,.10); display:grid; place-items:center; color:rgba(60,60,67,.62); }
-  .editor-form { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-  .editor-form label { display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .editor-form { box-sizing:border-box; width:100%; display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:10px; }
+  .editor-form label { box-sizing:border-box; display:flex; flex-direction:column; gap:6px; min-width:0; }
   .editor-form label.wide { grid-column:1 / -1; }
   .editor-form label > span { font-size:11px; color:rgba(60,60,67,.62); padding-left:4px; }
-  .editor-form input,.editor-form select { width:100%; min-height:46px; border:1px solid rgba(60,60,67,.08); border-radius:14px; background:rgba(118,118,128,.09); color:#111114; padding:0 13px; outline:none; }
+  .editor-form input,.editor-form select { box-sizing:border-box; width:100%; min-width:0; min-height:46px; border:1px solid rgba(60,60,67,.08); border-radius:14px; background:rgba(118,118,128,.09); color:#111114; padding:0 13px; outline:none; }
   .editor-form input:focus,.editor-form select:focus { border-color:rgba(91,86,214,.35); background:rgba(255,255,255,.46); }
-  .editor-form small { font-size:10px; color:rgba(60,60,67,.48); padding-left:4px; }
+  .editor-form small { font-size:10px; line-height:1.45; color:rgba(60,60,67,.48); padding-left:4px; }
   .editor-error { margin-top:12px; border-radius:14px; padding:11px 13px; font-size:12px; color:#b34f5b; background:rgba(220,70,84,.08); }
   .editor-actions { display:flex; align-items:center; gap:10px; margin-top:16px; }
   .editor-actions button { min-height:46px; border:0; border-radius:15px; font-weight:650; }

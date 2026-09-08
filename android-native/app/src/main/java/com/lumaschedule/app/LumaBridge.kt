@@ -88,7 +88,7 @@ class LumaBridge(
 
             "check_update" -> checkUpdate().toString()
 
-            "get_schedule_snapshot" -> database.getScheduleSnapshot().toString()
+            "get_schedule_snapshot" -> withCourseCredits(database.getScheduleSnapshot()).toString()
 
             "get_schedule_preferences" -> {
                 val result = database.getSchedulePreferences()
@@ -111,20 +111,24 @@ class LumaBridge(
                 result.toString()
             }
 
-            "get_grade_snapshot" -> database.getGradeSnapshot().toString()
+            "get_grade_snapshot" -> withScheduleCreditFallback(database.getGradeSnapshot()).toString()
 
             "commit_grade_bundle" -> database
                 .commitGradeBundle(args.getJSONObject("bundle"))
                 .toString()
 
             "save_schedule_course" -> {
-                val id = database.saveScheduleCourse(args.getJSONObject("course"))
+                val course = args.getJSONObject("course")
+                val id = database.saveScheduleCourse(course)
+                saveCourseCredit(id, course)
                 resyncRemindersIfEnabled()
                 JSONObject().put("value", id).toString()
             }
 
             "delete_schedule_course" -> {
-                database.deleteScheduleCourse(args.getString("id"))
+                val id = args.getString("id")
+                forgetCourseCredit(id)
+                database.deleteScheduleCourse(id)
                 resyncRemindersIfEnabled()
                 "null"
             }
@@ -316,6 +320,85 @@ class LumaBridge(
         }
     }
 
+    private fun courseCreditIndex(): JSONObject = database.getSettingRaw(COURSE_CREDIT_INDEX_KEY)
+        ?.let { runCatching { JSONObject(it) }.getOrNull() }
+        ?: JSONObject()
+
+    private fun normalizedCourseName(raw: String): String = raw
+        .trim()
+        .filterNot { it.isWhitespace() }
+        .lowercase()
+
+    private fun courseCreditFrom(input: JSONObject): Double? {
+        if (!input.has("credit") || input.isNull("credit")) return null
+        val value = when (val raw = input.opt("credit")) {
+            is Number -> raw.toDouble()
+            else -> raw?.toString()?.trim()?.toDoubleOrNull()
+        }
+        return value?.takeIf { it.isFinite() && it in 0.0..30.0 }
+    }
+
+    private fun saveCourseCredit(meetingId: String, course: JSONObject) {
+        val index = courseCreditIndex()
+        val metaKey = "$COURSE_CREDIT_META_PREFIX$meetingId"
+        val previous = database.getSettingRaw(metaKey)
+            ?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val previousName = normalizedCourseName(previous?.optString("name").orEmpty())
+        if (previousName.isNotBlank()) index.remove(previousName)
+
+        val credit = courseCreditFrom(course)
+        val name = course.optString("name").trim()
+        val normalizedName = normalizedCourseName(name)
+        if (credit != null && normalizedName.isNotBlank()) {
+            index.put(normalizedName, credit)
+            database.setSettingRaw(
+                metaKey,
+                JSONObject().put("name", name).put("credit", credit).toString()
+            )
+        } else {
+            database.setSettingRaw(metaKey, "null")
+        }
+        database.setSettingRaw(COURSE_CREDIT_INDEX_KEY, index.toString())
+    }
+
+    private fun forgetCourseCredit(meetingId: String) {
+        val metaKey = "$COURSE_CREDIT_META_PREFIX$meetingId"
+        val previous = database.getSettingRaw(metaKey)
+            ?.let { runCatching { JSONObject(it) }.getOrNull() }
+        val previousName = normalizedCourseName(previous?.optString("name").orEmpty())
+        if (previousName.isNotBlank()) {
+            val index = courseCreditIndex()
+            index.remove(previousName)
+            database.setSettingRaw(COURSE_CREDIT_INDEX_KEY, index.toString())
+        }
+        database.setSettingRaw(metaKey, "null")
+    }
+
+    private fun withCourseCredits(snapshot: JSONObject): JSONObject {
+        val index = courseCreditIndex()
+        val courses = snapshot.optJSONArray("courses") ?: return snapshot
+        for (position in 0 until courses.length()) {
+            val course = courses.optJSONObject(position) ?: continue
+            val key = normalizedCourseName(course.optString("name"))
+            val credit = if (key.isNotBlank() && index.has(key)) index.optDouble(key, Double.NaN) else Double.NaN
+            course.put("credit", if (credit.isFinite()) credit else JSONObject.NULL)
+        }
+        return snapshot
+    }
+
+    private fun withScheduleCreditFallback(snapshot: JSONObject): JSONObject {
+        val index = courseCreditIndex()
+        val records = snapshot.optJSONArray("records") ?: return snapshot
+        for (position in 0 until records.length()) {
+            val record = records.optJSONObject(position) ?: continue
+            if (record.has("credit") && !record.isNull("credit")) continue
+            val key = normalizedCourseName(record.optString("courseName"))
+            val credit = if (key.isNotBlank() && index.has(key)) index.optDouble(key, Double.NaN) else Double.NaN
+            if (credit.isFinite()) record.put("credit", credit)
+        }
+        return snapshot
+    }
+
     private fun checkUpdate(): JSONObject {
         val current = BuildConfig.VERSION_NAME.substringBefore('-').removePrefix("v")
         val connection = (URL(LATEST_RELEASE_API).openConnection() as HttpURLConnection).apply {
@@ -485,6 +568,8 @@ class LumaBridge(
     companion object {
         private const val WEB_DAV_PROFILE_KEY = "sync.webdav.profile"
         private const val WEEKEND_MODE_KEY = "schedule.weekend_mode"
+        private const val COURSE_CREDIT_INDEX_KEY = "course.credit.index"
+        private const val COURSE_CREDIT_META_PREFIX = "course.credit.meta."
         private const val LATEST_RELEASE_API = "https://api.github.com/repos/Junyxor/LumaSchedule/releases/latest"
     }
 }
