@@ -8,14 +8,18 @@ const appCss = fs.readFileSync('src/app.css', 'utf8');
 
 const requiredCore = [
   'const TIME_STEP_MINUTES = 5',
+  'const DEFAULT_DAY_START = 8 * 60',
+  'const DEFAULT_DAY_END = 22 * 60',
   'export let timelineCourses: Course[] = []',
   'class="week-time-grid"',
-  'class="time-guide"',
+  'class="time-guide major"',
   'class="time-label"',
   'courseGridPlacement(course)',
   'parseClock(course.start)',
   'parseClock(course.end)',
   'grid-template-rows: repeat(var(--time-row-count), var(--time-step-height))',
+  'align-self: stretch',
+  'justify-self: stretch',
   'class="course-credit"',
   'export let addRequest = 0'
 ];
@@ -27,32 +31,30 @@ for (const marker of requiredCore) {
   }
 }
 
-const activeRangeMarkers = [
-  'const TIMELINE_PADDING_MINUTES = 30',
-  'const MIN_TIMELINE_SPAN = 4 * 60',
-  'function paddedTimelineRange(',
-  'const earliestAllowed = earliest >= DEFAULT_DAY_START',
-  'visibleStartMinutes = visibleCourses.map((course) => courseStartMinute(course))',
-  'visibleEndMinutes = visibleCourses.map((course) => courseEndMinute(course))',
-  'timelineRange = paddedTimelineRange(earliestVisible, latestVisible, visibleCourses.length > 0)',
-  'timelineSections = sections.filter((section) =>',
+const stableRangeMarkers = [
+  'timeReferenceCourses = timelineCourses.length ? timelineCourses : courses',
+  'referenceStartMinutes = timeReferenceCourses.map((course) => courseStartMinute(course))',
+  'referenceEndMinutes = timeReferenceCourses.map((course) => courseEndMinute(course))',
+  'Math.min(DEFAULT_DAY_START, earliestReference)',
+  'Math.max(DEFAULT_DAY_END, latestReference)',
+  'minute >= timelineStart && minute < timelineEnd',
   '{#each timelineSections as section}'
 ];
 
-for (const marker of activeRangeMarkers) {
+for (const marker of stableRangeMarkers) {
   if (!core.includes(marker)) {
-    console.error(`Week active-range regression: missing ${marker}`);
+    console.error(`Week stable-day regression: missing ${marker}`);
     process.exit(1);
   }
 }
 
-if (core.includes('Math.max(preferences.defaultSections || 12, ...timeReferenceCourses')) {
-  console.error('Week active-range regression: default section count must not force every populated week to run until evening.');
+if (core.includes('MIN_TIMELINE_SPAN') || core.includes('paddedTimelineRange(')) {
+  console.error('Week stable-day regression: selected-week-only range trimming must not collapse a school day into a morning-only view.');
   process.exit(1);
 }
 
-if (core.includes('Math.max(latestKnown + 10, inferredSectionEnd(sectionCount))')) {
-  console.error('Week active-range regression: full-term inferred end time must not stretch the selected week timeline.');
+if (core.includes('visibleStartMinutes = visibleCourses') || core.includes('visibleEndMinutes = visibleCourses')) {
+  console.error('Week stable-day regression: active-week courses must not define the global time axis.');
   process.exit(1);
 }
 
@@ -114,12 +116,15 @@ const readableMarkers = [
   'position: sticky !important',
   '.page-week .week-time-grid',
   'repeat(var(--time-row-count), var(--time-step-height))',
+  'padding: 0 !important',
   '.page-week .time-guide.major',
   '.page-week .time-label',
-  '.page-week .week-time-grid .week-course span',
-  'text-overflow: clip !important',
-  'white-space: normal !important',
-  '--axis-width: 46px !important'
+  '.page-week .week-time-grid .week-course',
+  'align-self: stretch !important',
+  'justify-self: stretch !important',
+  'width: auto !important',
+  'word-break: normal !important',
+  '--axis-width: 42px !important'
 ];
 
 for (const marker of readableMarkers) {
@@ -134,8 +139,7 @@ const mobileVisualGuards = [
   'min-height: clamp(300px, 46dvh, 410px) !important',
   'margin-inline: 0 !important',
   '.page-week .week-toolbar .week-selector',
-  '.page-week .week-toolbar .week-title b',
-  'border-top-color: transparent !important'
+  '.page-week .week-toolbar .week-title b'
 ];
 
 for (const marker of mobileVisualGuards) {
@@ -155,4 +159,4 @@ if (!appCss.includes("@import './styles/week-readable-layout.css';")) {
   process.exit(1);
 }
 
-console.log('Week time-proportional layout contract OK');
+console.log('Week full-day time-proportional layout contract OK');
