@@ -86,10 +86,23 @@ class LumaBridge(
 
             "get_schedule_snapshot" -> database.getScheduleSnapshot().toString()
 
-            "get_schedule_preferences" -> database.getSchedulePreferences().toString()
+            "get_schedule_preferences" -> {
+                val result = database.getSchedulePreferences()
+                val storedMode = database.getSettingRaw(WEEKEND_MODE_KEY)
+                    ?.trim()
+                    ?.removeSurrounding("\"")
+                    ?.takeIf(::validWeekendMode)
+                    ?: if (result.has("showWeekend") && !result.optBoolean("showWeekend", true)) "weekdays" else "auto"
+                result.put("weekendMode", storedMode).toString()
+            }
 
             "save_schedule_preferences" -> {
-                val result = database.saveSchedulePreferences(args.getJSONObject("preferences"))
+                val input = args.getJSONObject("preferences")
+                val requestedMode = input.optString("weekendMode", "auto").takeIf(::validWeekendMode) ?: "auto"
+                input.put("showWeekend", requestedMode != "weekdays")
+                val result = database.saveSchedulePreferences(input)
+                database.setSettingRaw(WEEKEND_MODE_KEY, JSONObject.quote(requestedMode))
+                result.put("weekendMode", requestedMode)
                 resyncRemindersIfEnabled()
                 result.toString()
             }
@@ -268,6 +281,8 @@ class LumaBridge(
         }
     }
 
+    private fun validWeekendMode(value: String): Boolean = value in setOf("auto", "weekdays", "sat", "sun", "both")
+
     private fun saveTextDocument(mimeType: String, suggestedName: String, text: String): Boolean {
         val uri = activity.createDocumentBlocking(mimeType, suggestedName) ?: return false
         activity.contentResolver.openOutputStream(uri, "wt")?.use { stream ->
@@ -391,5 +406,6 @@ class LumaBridge(
 
     companion object {
         private const val WEB_DAV_PROFILE_KEY = "sync.webdav.profile"
+        private const val WEEKEND_MODE_KEY = "schedule.weekend_mode"
     }
 }
