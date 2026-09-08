@@ -104,3 +104,11 @@ export interface BackupSummary { schemaVersion: number; generatedAtUnixMs: numbe
 export interface WebDavProfile { baseUrl: string; username: string; remotePath: string; }
 export interface WebDavCredentials extends WebDavProfile { password: string; }
 export interface WebDavResult { ok: boolean; status: number; message: string; remoteUrl?: string | null; etag?: string | null; backup?: BackupSummary | null; }
+export interface UpdateCheckResult {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  releaseUrl: string;
+  name?: string | null;
+  publishedAt?: string | null;
+}

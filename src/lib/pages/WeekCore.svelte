@@ -9,6 +9,8 @@
   export let hasSchedule = false;
   export let currentWeek: number | null | undefined = null;
   export let termName: string | null | undefined = null;
+  export let displayDate: Date | null = null;
+  export let showTopbar = true;
   export let preferences: SchedulePreferences = {
     hasSchedule: false, termName: '', termStart: '', weekCount: 20, timezone: 'Asia/Shanghai', weekStartsOn: 1,
     weekendMode: 'auto', showTeacher: true, showRoom: true, showTime: true, compactMode: false, defaultSections: 12
@@ -46,7 +48,7 @@
     const jsDay = date.getDay();
     const offset = sundayFirst ? jsDay : (jsDay + 6) % 7;
     const start = new Date(date);
-    start.setHours(0, 0, 0, 0);
+    start.setHours(12, 0, 0, 0);
     start.setDate(date.getDate() - offset);
     const order = sundayFirst ? [7,1,2,3,4,5,6] : [1,2,3,4,5,6,7];
     const days = new Map<number, { label: string; dayNumber: number; date: string; month: number; fullDate: Date }>();
@@ -61,7 +63,11 @@
         fullDate: item
       });
     });
-    return { days, order, todayDayNumber: ((date.getDay() + 6) % 7) + 1 };
+    return { days, order };
+  }
+
+  function sameDay(left: Date, right: Date) {
+    return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
   }
 
   function normalizedWeekendMode(): WeekendMode {
@@ -188,7 +194,7 @@
   onMount(() => { timer = setInterval(() => (now = new Date()), 60_000); });
   onDestroy(() => { if (timer) clearInterval(timer); });
 
-  $: context = weekContext(now);
+  $: context = weekContext(displayDate ?? now);
   $: weekendMode = normalizedWeekendMode();
   $: visibleDayNumbers = resolveVisibleDayNumbers(weekendMode, context.order);
   $: visibleDays = visibleDayNumbers.map((day) => context.days.get(day)).filter((day): day is NonNullable<typeof day> => Boolean(day));
@@ -200,24 +206,26 @@
   $: firstVisibleDay = visibleDays[0];
   $: lastVisibleDay = visibleDays[visibleDays.length - 1];
   $: rangeLabel = firstVisibleDay && lastVisibleDay ? `${firstVisibleDay.month}月${firstVisibleDay.fullDate.getDate()}日 – ${lastVisibleDay.month}月${lastVisibleDay.fullDate.getDate()}日` : '';
-  $: title = currentWeek ? `第 ${currentWeek} 周` : '本周课表';
-  $: subtitle = [termName, visibleCourses.length ? `${visibleCourses.length} 个课程时段` : hasSchedule ? '当前周暂无课程' : '还没有课表'].filter(Boolean).join(' · ');
+  $: title = currentWeek ? `第 ${currentWeek} 周` : '周课表';
+  $: subtitle = [termName, visibleCourses.length ? `${visibleCourses.length} 个课程时段` : hasSchedule ? '本周暂无课程' : '还没有课表'].filter(Boolean).join(' · ');
 </script>
 
-<section class="page page-week">
-  <header class="topbar week-topbar">
-    <div>
-      <span class="eyebrow">{rangeLabel}</span>
-      <h1>{title}</h1>
-      <p>{subtitle}</p>
-    </div>
-    <button class="week-add glass-panel" on:click={newCourse} aria-label="新增课程"><Plus size={22} strokeWidth={1.9} /></button>
-  </header>
+<section class="page page-week-core">
+  {#if showTopbar}
+    <header class="topbar week-topbar">
+      <div>
+        <span class="eyebrow">{rangeLabel}</span>
+        <h1>{title}</h1>
+        <p>{subtitle}</p>
+      </div>
+      <button class="week-add glass-panel" on:click={newCourse} aria-label="新增课程"><Plus size={22} strokeWidth={1.9} /></button>
+    </header>
+  {/if}
 
   <div class="week-board content-surface" class:compact={preferences.compactMode} style={`--section-count:${sectionCount};--day-count:${dayCount};--row-height:${rowHeight}px`}>
     <div class="week-header">
       <div class="corner">节</div>
-      {#each visibleDays as day}<div class:today={day.dayNumber === context.todayDayNumber}><span>{day.label}</span><b>{day.date}</b></div>{/each}
+      {#each visibleDays as day}<div class:today={sameDay(day.fullDate, now)}><span>{day.label}</span><b>{day.date}</b></div>{/each}
     </div>
     <div class="week-scroll">
       <div class="section-column">{#each sections as n}<div><b>{n}</b></div>{/each}</div>
@@ -229,9 +237,11 @@
           {#if preferences.showTime && course.start}<small>{course.start}{course.end ? `–${course.end}` : ''}</small>{/if}
         </button>
       {/each}
-      {#if !visibleCourses.length}<div class="week-empty">{hasSchedule ? '当前周没有课程。点右上角 + 可以手动添加。' : '还没有课表。你可以导入教务课表，也可以点右上角 + 手动添加。'}</div>{/if}
+      {#if !visibleCourses.length}<div class="week-empty">{hasSchedule ? `第 ${currentWeek || ''} 周没有课程。` : '还没有课表。你可以导入教务课表，也可以点右上角 + 手动添加。'}</div>{/if}
     </div>
   </div>
+
+  {#if !showTopbar}<button class="floating-week-add glass-panel" on:click={newCourse} aria-label="新增课程"><Plus size={21} strokeWidth={1.9} /></button>{/if}
 </section>
 
 {#if editorOpen}
@@ -276,35 +286,37 @@
 />
 
 <style>
-  .week-topbar { align-items: center; }
-  .week-add { width: 46px; height: 46px; border-radius: 23px; border: 0; display: grid; place-items: center; color: #5b56d6; flex: none; }
-  .week-board .week-header { grid-template-columns: 54px repeat(var(--day-count), 1fr); }
-  .week-board .section-column { height: calc(var(--section-count) * var(--row-height)); grid-template-rows: repeat(var(--section-count), var(--row-height)); }
-  .week-board .week-gridlines { height: calc(var(--section-count) * var(--row-height)); grid-template-columns: repeat(var(--day-count), 1fr); background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--row-height) - 1px), rgba(77,82,102,.055) calc(var(--row-height) - 1px), rgba(77,82,102,.055) var(--row-height)); }
-  .week-board .week-course { left: calc(54px + (var(--col) - 1) * ((100% - 54px) / var(--day-count)) + 5px); top: calc((var(--start) - 1) * var(--row-height) + 5px); width: calc((100% - 54px) / var(--day-count) - 10px); height: calc(var(--span) * var(--row-height) - 10px); border: 0; text-align: left; font: inherit; cursor: pointer; }
-  .week-board.compact .week-course { padding: 7px 8px; border-radius: 11px; }
-  .week-board.compact .week-course b { font-size: 9px; }
-  .week-board.compact .week-course span, .week-board.compact .week-course small { margin-top: 2px; }
-  .course-editor-backdrop { position: fixed; inset: 0; z-index: 120; display: flex; align-items: flex-end; justify-content: center; background: rgba(18,18,24,.22); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
-  .course-editor { position: relative; width: min(620px, 100%); max-height: min(88dvh, 760px); overflow: auto; border-radius: 30px 30px 0 0; padding: 8px 18px calc(20px + env(safe-area-inset-bottom)); }
-  .editor-grabber { width: 38px; height: 5px; border-radius: 999px; background: rgba(60,60,67,.22); margin: 0 auto 10px; }
-  .editor-head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
-  .editor-head > div { flex: 1; min-width: 0; }
-  .editor-head span { font-size: 11px; color: rgba(60,60,67,.56); }
-  .editor-head h2 { margin: 2px 0 0; font-size: 23px; line-height: 1.12; letter-spacing: -.035em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .editor-head button { width: 38px; height: 38px; border: 0; border-radius: 19px; background: rgba(118,118,128,.10); display: grid; place-items: center; color: rgba(60,60,67,.62); }
-  .editor-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .editor-form label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-  .editor-form label.wide { grid-column: 1 / -1; }
-  .editor-form label > span { font-size: 11px; color: rgba(60,60,67,.62); padding-left: 4px; }
-  .editor-form input, .editor-form select { width: 100%; min-height: 46px; border: 1px solid rgba(60,60,67,.08); border-radius: 14px; background: rgba(118,118,128,.09); color: #111114; padding: 0 13px; outline: none; }
-  .editor-form input:focus, .editor-form select:focus { border-color: rgba(91,86,214,.35); background: rgba(255,255,255,.46); }
-  .editor-form small { font-size: 10px; color: rgba(60,60,67,.48); padding-left: 4px; }
-  .editor-error { margin-top: 12px; border-radius: 14px; padding: 11px 13px; font-size: 12px; color: #b34f5b; background: rgba(220,70,84,.08); }
-  .editor-actions { display: flex; align-items: center; gap: 10px; margin-top: 16px; }
-  .editor-actions button { min-height: 46px; border: 0; border-radius: 15px; font-weight: 650; }
-  .delete-course { padding: 0 14px; display: inline-flex; align-items: center; gap: 7px; color: #c44d5e; background: rgba(220,70,84,.09); }
-  .save-course { margin-left: auto; min-width: 118px; padding: 0 22px; color: white; background: #5b56d6; box-shadow: 0 9px 20px rgba(91,86,214,.22); }
-  .editor-actions button:disabled { opacity: .55; }
-  @media (min-width: 761px) { .course-editor-backdrop { align-items: center; padding: 24px; } .course-editor { border-radius: 30px; } }
+  .page-week-core { position:relative; }
+  .week-topbar { align-items:center; }
+  .week-add { width:46px; height:46px; border-radius:23px; border:0; display:grid; place-items:center; color:#5b56d6; flex:none; }
+  .floating-week-add { position:absolute; right:14px; top:14px; z-index:8; width:42px; height:42px; border-radius:21px; border:0; display:grid; place-items:center; color:#5b56d6; }
+  .week-board .week-header { grid-template-columns:54px repeat(var(--day-count),1fr); }
+  .week-board .section-column { height:calc(var(--section-count) * var(--row-height)); grid-template-rows:repeat(var(--section-count),var(--row-height)); }
+  .week-board .week-gridlines { height:calc(var(--section-count) * var(--row-height)); grid-template-columns:repeat(var(--day-count),1fr); background:repeating-linear-gradient(to bottom,transparent 0,transparent calc(var(--row-height) - 1px),rgba(77,82,102,.055) calc(var(--row-height) - 1px),rgba(77,82,102,.055) var(--row-height)); }
+  .week-board .week-course { left:calc(54px + (var(--col) - 1) * ((100% - 54px) / var(--day-count)) + 5px); top:calc((var(--start) - 1) * var(--row-height) + 5px); width:calc((100% - 54px) / var(--day-count) - 10px); height:calc(var(--span) * var(--row-height) - 10px); border:0; text-align:left; font:inherit; cursor:pointer; }
+  .week-board.compact .week-course { padding:7px 8px; border-radius:11px; }
+  .week-board.compact .week-course b { font-size:9px; }
+  .week-board.compact .week-course span,.week-board.compact .week-course small { margin-top:2px; }
+  .course-editor-backdrop { position:fixed; inset:0; z-index:120; display:flex; align-items:flex-end; justify-content:center; background:rgba(18,18,24,.22); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); }
+  .course-editor { position:relative; width:min(620px,100%); max-height:min(88dvh,760px); overflow:auto; border-radius:30px 30px 0 0; padding:8px 18px calc(20px + env(safe-area-inset-bottom)); }
+  .editor-grabber { width:38px; height:5px; border-radius:999px; background:rgba(60,60,67,.22); margin:0 auto 10px; }
+  .editor-head { display:flex; align-items:center; gap:14px; margin-bottom:16px; }
+  .editor-head > div { flex:1; min-width:0; }
+  .editor-head span { font-size:11px; color:rgba(60,60,67,.56); }
+  .editor-head h2 { margin:2px 0 0; font-size:23px; line-height:1.12; letter-spacing:-.035em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .editor-head button { width:38px; height:38px; border:0; border-radius:19px; background:rgba(118,118,128,.10); display:grid; place-items:center; color:rgba(60,60,67,.62); }
+  .editor-form { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .editor-form label { display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .editor-form label.wide { grid-column:1 / -1; }
+  .editor-form label > span { font-size:11px; color:rgba(60,60,67,.62); padding-left:4px; }
+  .editor-form input,.editor-form select { width:100%; min-height:46px; border:1px solid rgba(60,60,67,.08); border-radius:14px; background:rgba(118,118,128,.09); color:#111114; padding:0 13px; outline:none; }
+  .editor-form input:focus,.editor-form select:focus { border-color:rgba(91,86,214,.35); background:rgba(255,255,255,.46); }
+  .editor-form small { font-size:10px; color:rgba(60,60,67,.48); padding-left:4px; }
+  .editor-error { margin-top:12px; border-radius:14px; padding:11px 13px; font-size:12px; color:#b34f5b; background:rgba(220,70,84,.08); }
+  .editor-actions { display:flex; align-items:center; gap:10px; margin-top:16px; }
+  .editor-actions button { min-height:46px; border:0; border-radius:15px; font-weight:650; }
+  .delete-course { padding:0 14px; display:inline-flex; align-items:center; gap:7px; color:#c44d5e; background:rgba(220,70,84,.09); }
+  .save-course { margin-left:auto; min-width:118px; padding:0 22px; color:white; background:#5b56d6; box-shadow:0 9px 20px rgba(91,86,214,.22); }
+  .editor-actions button:disabled { opacity:.55; }
+  @media (min-width:761px) { .course-editor-backdrop { align-items:center; padding:24px; } .course-editor { border-radius:30px; } }
 </style>
