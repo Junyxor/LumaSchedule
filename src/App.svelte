@@ -168,7 +168,7 @@
     {#if page === 'today'}
       <Today courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} preferences={schedulePreferences} />
     {:else if page === 'week'}
-      <Week courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} preferences={schedulePreferences} on:changed={loadRuntimeData} />
+      <Week courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} preferences={schedulePreferences} on:changed={loadRuntimeData} on:openSettings={() => (page = 'settings')} />
     {:else if page === 'grades'}
       <Grades />
     {:else if page === 'import'}
