@@ -1,0 +1,74 @@
+@media (max-width: 760px) {
+  /*
+   * The schedule preferences already expose teacher / room and compact mode.
+   * Keep compact mode genuinely compact, but let non-compact mode become a
+   * readable information-dense timetable instead of hiding metadata in CSS.
+   */
+  .page-week .week-board.compact {
+    --time-step-height: 2.55px !important;
+  }
+
+  .page-week .week-board:not(.compact) {
+    --time-step-height: 4.5px !important;
+  }
+
+  .page-week .week-board:not(.compact) .week-course {
+    gap: 1.5px !important;
+    margin: 2px !important;
+    padding: 5px 4px !important;
+    justify-content: flex-start !important;
+  }
+
+  .page-week .week-board:not(.compact) .week-course b {
+    font-size: 9.4px !important;
+    line-height: 1.08 !important;
+    margin: 0 0 1px !important;
+  }
+
+  .page-week .week-board:not(.compact) .week-course span {
+    display: block !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    font-size: 7.8px !important;
+    line-height: 1.12 !important;
+    font-weight: 560 !important;
+    color: rgba(38, 37, 45, .74) !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere !important;
+    word-break: break-word !important;
+  }
+
+  .page-week .week-board:not(.compact) .week-course .course-credit {
+    display: block !important;
+    margin-top: 1px !important;
+    font-size: 7.6px !important;
+    line-height: 1.1 !important;
+    font-weight: 680 !important;
+    color: rgba(38, 37, 45, .68) !important;
+    white-space: normal !important;
+  }
+
+  /* Compact mode is the Shiguang-like quick-glance layout: course title only. */
+  .page-week .week-board.compact .week-course span,
+  .page-week .week-board.compact .week-course .course-credit {
+    display: none !important;
+  }
+}
+
+@media (max-width: 390px) {
+  .page-week .week-board:not(.compact) {
+    --time-step-height: 4.7px !important;
+  }
+
+  .page-week .week-board:not(.compact) .week-course b {
+    font-size: 8.9px !important;
+  }
+
+  .page-week .week-board:not(.compact) .week-course span {
+    font-size: 7.3px !important;
+  }
+
+  .page-week .week-board:not(.compact) .week-course .course-credit {
+    font-size: 7.1px !important;
+  }
+}
