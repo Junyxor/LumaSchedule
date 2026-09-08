@@ -1,26 +1,4 @@
-.week-board { --section-count: 12; }
-.section-column {
-  height: calc(var(--section-count) * 65px);
-  grid-template-rows: repeat(var(--section-count), 65px);
-}
-.week-gridlines { height: calc(var(--section-count) * 65px); }
-.week-scroll::after {
-  content: "";
-  display: block;
-  width: 1px;
-  height: calc(var(--section-count) * 65px);
-  pointer-events: none;
-}
-.week-course { cursor: default; }
-
 @media (max-width: 760px) {
-  .section-column {
-    height: calc(var(--section-count) * 56px);
-    grid-template-rows: repeat(var(--section-count), 56px);
-  }
-  .week-gridlines { height: calc(var(--section-count) * 56px); }
-  .week-scroll::after { height: calc(var(--section-count) * 56px); }
-
   /* The tab bar owns the system bottom safe area instead of floating above it. */
   .mobile-nav {
     left: 0;
@@ -33,6 +11,7 @@
     border-radius: 27px 27px 0 0;
     box-sizing: border-box;
   }
+
   .page {
     padding-bottom: calc(88px + env(safe-area-inset-bottom));
   }
