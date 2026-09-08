@@ -1,0 +1,38 @@
+name: Feature request
+description: 提交课程表、成绩、导入、小组件或其他功能建议
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎提出改进建议。越具体的使用场景越容易评估和实现。
+  - type: input
+    id: scenario
+    attributes:
+      label: 使用场景
+      placeholder: 例如每周只有周六有课，希望自动只显示周六列
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 希望怎么改
+      placeholder: 描述你期望的交互、设置项或结果
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: 参考应用 / 截图 / 链接
+      description: 如有成熟课表应用的类似功能，可以放在这里。
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 你认为的重要程度
+      options:
+        - 日常高频
+        - 有明显帮助
+        - 锦上添花
+    validations:
+      required: true
