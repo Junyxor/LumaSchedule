@@ -310,6 +310,10 @@
   }
 
   @media (max-width:760px) {
+    .week-board-swipe {
+      margin-inline:-8px;
+    }
+
     .week-toolbar {
       grid-template-columns:34px minmax(0, 1fr) 38px 34px;
       gap:3px;
