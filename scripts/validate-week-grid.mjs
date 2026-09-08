@@ -74,6 +74,27 @@ for (const marker of readableMarkers) {
   }
 }
 
+const mobileVisualGuards = [
+  '.page-week .week-time-grid:has(.week-empty)',
+  'min-height: clamp(300px, 46dvh, 410px) !important',
+  'margin-inline: 0 !important',
+  '.page-week .week-toolbar .week-selector',
+  '.page-week .week-toolbar .week-title b',
+  'border-top-color: transparent !important'
+];
+
+for (const marker of mobileVisualGuards) {
+  if (!readable.includes(marker)) {
+    console.error(`Week mobile visual regression: missing ${marker}`);
+    process.exit(1);
+  }
+}
+
+if (/\.page-week \.week-board-swipe\s*\{[^}]*margin-inline:\s*-\d/s.test(readable)) {
+  console.error('Week mobile visual regression: timetable must align with the page instead of bleeding to the screen edge.');
+  process.exit(1);
+}
+
 if (!appCss.includes("@import './styles/week-readable-layout.css';")) {
   console.error('Week readability regression: final mobile timetable overrides are not loaded.');
   process.exit(1);
