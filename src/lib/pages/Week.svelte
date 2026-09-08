@@ -3,7 +3,7 @@
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import ConfirmSheet from '../components/ConfirmSheet.svelte';
   import { deleteScheduleCourse, saveScheduleCourse } from '../tauri';
-  import type { Course, CourseMutation, SchedulePreferences } from '../types';
+  import type { Course, CourseMutation, SchedulePreferences, WeekendMode } from '../types';
 
   export let courses: Course[];
   export let hasSchedule = false;
@@ -11,7 +11,7 @@
   export let termName: string | null | undefined = null;
   export let preferences: SchedulePreferences = {
     hasSchedule: false, termName: '', termStart: '', weekCount: 20, timezone: 'Asia/Shanghai', weekStartsOn: 1,
-    showWeekend: true, showTeacher: true, showRoom: true, showTime: true, compactMode: false, defaultSections: 12
+    weekendMode: 'auto', showTeacher: true, showRoom: true, showTime: true, compactMode: false, defaultSections: 12
   };
 
   const dispatch = createEventDispatcher<{ changed: void }>();
@@ -48,15 +48,32 @@
     const days = weekdayNames.map((label, index) => {
       const item = new Date(monday);
       item.setDate(monday.getDate() + index);
-      return { label, date: String(item.getDate()).padStart(2, '0') };
+      return {
+        label,
+        dayNumber: index + 1,
+        date: String(item.getDate()).padStart(2, '0'),
+        month: item.getMonth() + 1,
+        fullDate: item
+      };
     });
-    const last = new Date(monday);
-    last.setDate(monday.getDate() + (preferences.showWeekend ? 6 : 4));
-    return {
-      days,
-      todayIndex: ((date.getDay() + 6) % 7),
-      rangeLabel: `${monday.getMonth() + 1}月${monday.getDate()}日 – ${last.getMonth() + 1}月${last.getDate()}日`
-    };
+    return { days, todayDayNumber: ((date.getDay() + 6) % 7) + 1 };
+  }
+
+  function normalizedWeekendMode(): WeekendMode {
+    if (preferences.weekendMode) return preferences.weekendMode;
+    return preferences.showWeekend === false ? 'weekdays' : 'auto';
+  }
+
+  function resolveVisibleDayNumbers(mode: WeekendMode) {
+    const weekdays = [1, 2, 3, 4, 5];
+    if (mode === 'weekdays') return weekdays;
+    if (mode === 'sat') return [...weekdays, 6];
+    if (mode === 'sun') return [...weekdays, 7];
+    if (mode === 'both') return [...weekdays, 6, 7];
+    const result = [...weekdays];
+    if (courses.some((course) => course.day === 6)) result.push(6);
+    if (courses.some((course) => course.day === 7)) result.push(7);
+    return result;
   }
 
   function weeksToText(weeks: number[]) {
@@ -94,6 +111,11 @@
 
   function courseMeta(course: Course) {
     return [preferences.showRoom ? course.room : '', preferences.showTeacher ? course.teacher : ''].filter(Boolean).join(' · ');
+  }
+
+  function columnFor(day: number) {
+    const index = visibleDayNumbers.indexOf(day);
+    return index >= 0 ? index + 1 : 1;
   }
 
   function newCourse() {
@@ -163,12 +185,16 @@
   onDestroy(() => { if (timer) clearInterval(timer); });
 
   $: context = weekContext(now);
-  $: visibleDays = preferences.showWeekend ? context.days : context.days.slice(0, 5);
-  $: visibleCourses = preferences.showWeekend ? courses : courses.filter((course) => course.day <= 5);
-  $: dayCount = preferences.showWeekend ? 7 : 5;
+  $: weekendMode = normalizedWeekendMode();
+  $: visibleDayNumbers = resolveVisibleDayNumbers(weekendMode);
+  $: visibleDays = visibleDayNumbers.map((day) => context.days[day - 1]);
+  $: visibleCourses = courses.filter((course) => visibleDayNumbers.includes(course.day));
+  $: dayCount = visibleDayNumbers.length;
   $: sectionCount = Math.max(preferences.defaultSections || 12, ...visibleCourses.map((course) => course.endSection || 0));
   $: sections = Array.from({ length: sectionCount }, (_, i) => i + 1);
   $: rowHeight = preferences.compactMode ? 54 : 65;
+  $: lastVisibleDay = visibleDays[visibleDays.length - 1] ?? context.days[4];
+  $: rangeLabel = `${context.days[0].month}月${context.days[0].fullDate.getDate()}日 – ${lastVisibleDay.month}月${lastVisibleDay.fullDate.getDate()}日`;
   $: title = currentWeek ? `第 ${currentWeek} 周` : '本周课表';
   $: subtitle = [termName, visibleCourses.length ? `${visibleCourses.length} 个课程时段` : hasSchedule ? '当前周暂无课程' : '还没有课表'].filter(Boolean).join(' · ');
 </script>
@@ -176,7 +202,7 @@
 <section class="page page-week">
   <header class="topbar week-topbar">
     <div>
-      <span class="eyebrow">{context.rangeLabel}</span>
+      <span class="eyebrow">{rangeLabel}</span>
       <h1>{title}</h1>
       <p>{subtitle}</p>
     </div>
@@ -186,13 +212,13 @@
   <div class="week-board content-surface" class:compact={preferences.compactMode} style={`--section-count:${sectionCount};--day-count:${dayCount};--row-height:${rowHeight}px`}>
     <div class="week-header">
       <div class="corner">节</div>
-      {#each visibleDays as day, i}<div class:today={i === context.todayIndex}><span>{day.label}</span><b>{day.date}</b></div>{/each}
+      {#each visibleDays as day}<div class:today={day.dayNumber === context.todayDayNumber}><span>{day.label}</span><b>{day.date}</b></div>{/each}
     </div>
     <div class="week-scroll">
       <div class="section-column">{#each sections as n}<div><b>{n}</b></div>{/each}</div>
       <div class="week-gridlines">{#each Array(dayCount) as _}<div></div>{/each}</div>
       {#each visibleCourses as course}
-        <button class="week-course {course.color}" style={`--day:${course.day};--start:${course.startSection};--span:${course.endSection - course.startSection + 1}`} aria-label={`编辑 ${course.name}`} on:click={() => editCourse(course)}>
+        <button class="week-course {course.color}" style={`--col:${columnFor(course.day)};--start:${course.startSection};--span:${course.endSection - course.startSection + 1}`} aria-label={`编辑 ${course.name}`} on:click={() => editCourse(course)}>
           <b>{course.name}</b>
           {#if courseMeta(course)}<span>{courseMeta(course)}</span>{/if}
           {#if preferences.showTime && course.start}<small>{course.start}{course.end ? `–${course.end}` : ''}</small>{/if}
@@ -250,7 +276,7 @@
   .week-board .week-header { grid-template-columns: 54px repeat(var(--day-count), 1fr); }
   .week-board .section-column { height: calc(var(--section-count) * var(--row-height)); grid-template-rows: repeat(var(--section-count), var(--row-height)); }
   .week-board .week-gridlines { height: calc(var(--section-count) * var(--row-height)); grid-template-columns: repeat(var(--day-count), 1fr); background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(var(--row-height) - 1px), rgba(77,82,102,.055) calc(var(--row-height) - 1px), rgba(77,82,102,.055) var(--row-height)); }
-  .week-board .week-course { left: calc(54px + (var(--day) - 1) * ((100% - 54px) / var(--day-count)) + 5px); top: calc((var(--start) - 1) * var(--row-height) + 5px); width: calc((100% - 54px) / var(--day-count) - 10px); height: calc(var(--span) * var(--row-height) - 10px); border: 0; text-align: left; font: inherit; cursor: pointer; }
+  .week-board .week-course { left: calc(54px + (var(--col) - 1) * ((100% - 54px) / var(--day-count)) + 5px); top: calc((var(--start) - 1) * var(--row-height) + 5px); width: calc((100% - 54px) / var(--day-count) - 10px); height: calc(var(--span) * var(--row-height) - 10px); border: 0; text-align: left; font: inherit; cursor: pointer; }
   .week-board.compact .week-course { padding: 7px 8px; border-radius: 11px; }
   .week-board.compact .week-course b { font-size: 9px; }
   .week-board.compact .week-course span, .week-board.compact .week-course small { margin-top: 2px; }
