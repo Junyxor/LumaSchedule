@@ -227,7 +227,7 @@
   $: subtitle = [termName, visibleCourses.length ? `${visibleCourses.length} 个课程时段` : hasSchedule ? '本周暂无课程' : '还没有课表'].filter(Boolean).join(' · ');
 </script>
 
-<section class="page page-week-core">
+<section class="page-week-core">
   {#if showTopbar}
     <header class="topbar week-topbar">
       <div>
@@ -303,7 +303,7 @@
 />
 
 <style>
-  .page-week-core { position:relative; }
+  .page-week-core { position:relative; width:100%; min-width:0; }
   .week-topbar { align-items:center; }
   .week-add { width:46px; height:46px; border-radius:23px; border:0; display:grid; place-items:center; color:#5b56d6; flex:none; }
   .floating-week-add { position:absolute; right:14px; top:14px; z-index:8; width:42px; height:42px; border-radius:21px; border:0; display:grid; place-items:center; color:#5b56d6; }
