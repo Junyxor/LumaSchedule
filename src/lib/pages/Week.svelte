@@ -11,7 +11,7 @@
   export let termName: string | null | undefined = null;
   export let preferences: SchedulePreferences;
 
-  const dispatch = createEventDispatcher<{ changed: void; openSettings: void }>();
+  const dispatch = createEventDispatcher<{ changed: void }>();
   let allCourses: Course[] = courses;
   let fullHasSchedule = hasSchedule;
   let fullTermName = termName || preferences.termName || '';
@@ -74,11 +74,11 @@
     return `${date.getMonth() + 1}.${date.getDate()}`;
   }
 
-  function rangeLabel(week: number) {
+  function compactRangeLabel(week: number) {
     const start = weekStart(week);
     const end = new Date(start);
     end.setDate(start.getDate() + 6);
-    return `${start.getMonth() + 1}月${start.getDate()}日 – ${end.getMonth() + 1}月${end.getDate()}日`;
+    return `${start.getMonth() + 1}.${start.getDate()}–${end.getMonth() + 1}.${end.getDate()}`;
   }
 
   function beginSwipe(event: PointerEvent) {
@@ -134,38 +134,49 @@
 </script>
 
 <section class="page page-week week-shell">
-  <div class="week-nav glass-panel" aria-label="教学周导航">
-    <div class="week-nav-main">
-      <button class="week-arrow" on:click={() => selectWeek(selectedWeek - 1)} disabled={selectedWeek <= 1} aria-label="上一周">
-        <ChevronLeft size={22}/>
-      </button>
+  <div class="week-toolbar glass-panel" aria-label="教学周导航">
+    <button
+      class="week-arrow"
+      on:click={() => selectWeek(selectedWeek - 1)}
+      disabled={selectedWeek <= 1}
+      aria-label="上一周"
+    >
+      <ChevronLeft size={21}/>
+    </button>
 
-      <label class="week-jump">
-        <span class="week-range">{rangeLabel(selectedWeek)}</span>
-        <span class="week-title-row">
-          <b>第 {selectedWeek} 周</b>
-          {#if selectedWeek === currentTeachingWeek}<em>本周</em>{/if}
-        </span>
-        <small>{fullTermName || (fullTermStart ? '当前学期' : '尚未设置学期')} · {weekCourses.length ? `${weekCourses.length} 个课程时段` : '暂无课程'} · 点击跳周</small>
-        <select value={selectedWeek} on:change={(event) => selectWeek(Number(event.currentTarget.value))} aria-label="直接跳转到指定周">
-          {#each weekOptions as week}<option value={week}>第 {week} 周 · {shortDate(weekStart(week))}</option>{/each}
-        </select>
-      </label>
+    <label class="week-selector">
+      <span class="week-title">
+        <b>第 {selectedWeek} 周</b>
+        {#if selectedWeek === currentTeachingWeek}<em>本周</em>{/if}
+      </span>
+      <span class="week-date">{compactRangeLabel(selectedWeek)} · 点击跳周</span>
+      <select
+        value={selectedWeek}
+        on:change={(event) => selectWeek(Number(event.currentTarget.value))}
+        aria-label="直接跳转到指定周"
+      >
+        {#each weekOptions as week}
+          <option value={week}>第 {week} 周 · {shortDate(weekStart(week))}</option>
+        {/each}
+      </select>
+    </label>
 
-      <button class="week-arrow" on:click={() => selectWeek(selectedWeek + 1)} disabled={selectedWeek >= fullWeekCount} aria-label="下一周">
-        <ChevronRight size={22}/>
-      </button>
-    </div>
+    <button
+      class="current-week"
+      class:active={selectedWeek === currentTeachingWeek}
+      on:click={() => selectWeek(currentTeachingWeek)}
+      disabled={selectedWeek === currentTeachingWeek}
+      aria-label="回到本周"
+    >本周</button>
 
-    <div class="week-nav-meta">
-      <span>共 {fullWeekCount} 周</span>
-      {#if !fullTermStart}
-        <button on:click={() => dispatch('openSettings')}>设置开学日期</button>
-      {/if}
-      {#if selectedWeek !== currentTeachingWeek}
-        <button on:click={() => selectWeek(currentTeachingWeek)}>回本周</button>
-      {/if}
-    </div>
+    <button
+      class="week-arrow"
+      on:click={() => selectWeek(selectedWeek + 1)}
+      disabled={selectedWeek >= fullWeekCount}
+      aria-label="下一周"
+    >
+      <ChevronRight size={21}/>
+    </button>
   </div>
 
   <div class="week-board-swipe" on:pointerdown={beginSwipe} on:pointerup={endSwipe} on:pointercancel={cancelSwipe}>
@@ -187,85 +198,74 @@
 <style>
   .week-shell {
     display:grid;
-    gap:8px;
+    gap:4px;
   }
 
-  .week-nav {
-    padding:7px 9px 6px;
-    border-radius:20px;
-  }
-
-  .week-nav-main {
+  .week-toolbar {
     display:grid;
-    grid-template-columns:42px minmax(0,1fr) 42px;
+    grid-template-columns:38px minmax(0, 1fr) 42px 38px;
     align-items:center;
-    gap:5px;
+    gap:4px;
+    min-height:52px;
+    padding:5px 7px;
+    border-radius:18px;
   }
 
   .week-arrow {
-    width:42px;
-    height:52px;
+    width:38px;
+    height:42px;
     border:0;
-    border-radius:15px;
+    border-radius:13px;
     display:grid;
     place-items:center;
-    background:rgba(118,118,128,.065);
+    background:transparent;
     color:#5751c9;
   }
 
   .week-arrow:disabled {
-    opacity:.26;
+    opacity:.24;
   }
 
-  .week-jump {
+  .week-selector {
     position:relative;
     min-width:0;
-    min-height:58px;
-    padding:5px 10px 4px;
-    border-radius:16px;
+    height:42px;
     display:grid;
-    place-items:center;
     align-content:center;
     gap:1px;
-    text-align:center;
-    background:rgba(91,86,214,.09);
-    color:inherit;
+    padding:0 8px;
+    border-radius:13px;
+    background:rgba(91,86,214,.08);
     cursor:pointer;
   }
 
-  .week-range {
-    color:rgba(60,60,67,.52);
-    font-size:9px;
-    line-height:1.2;
-  }
-
-  .week-title-row {
+  .week-title {
+    min-width:0;
     display:flex;
     align-items:center;
-    justify-content:center;
     gap:6px;
-    min-width:0;
   }
 
-  .week-title-row b {
-    font-size:23px;
-    line-height:1.08;
-    letter-spacing:-.045em;
+  .week-title b {
+    font-size:16px;
+    line-height:1.05;
+    letter-spacing:-.03em;
+    white-space:nowrap;
   }
 
-  .week-title-row em {
-    padding:3px 6px;
+  .week-title em {
+    padding:2px 5px;
     border-radius:999px;
     background:rgba(91,86,214,.13);
     color:#5751c9;
-    font-size:8px;
+    font-size:7px;
     font-style:normal;
     font-weight:750;
+    white-space:nowrap;
   }
 
-  .week-jump small {
-    max-width:100%;
-    color:rgba(60,60,67,.46);
+  .week-date {
+    color:rgba(60,60,67,.47);
     font-size:8px;
     line-height:1.2;
     white-space:nowrap;
@@ -273,7 +273,7 @@
     text-overflow:ellipsis;
   }
 
-  .week-jump select {
+  .week-selector select {
     position:absolute;
     inset:0;
     width:100%;
@@ -282,27 +282,20 @@
     cursor:pointer;
   }
 
-  .week-nav-meta {
-    min-height:22px;
-    margin-top:3px;
-    padding:0 5px;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    gap:6px;
-    color:rgba(60,60,67,.45);
-    font-size:8px;
-  }
-
-  .week-nav-meta button {
-    min-height:22px;
-    padding:0 8px;
+  .current-week {
+    width:42px;
+    height:32px;
     border:0;
     border-radius:999px;
-    background:rgba(91,86,214,.09);
+    background:rgba(91,86,214,.10);
     color:#5751c9;
-    font-size:8px;
-    font-weight:650;
+    font-size:9px;
+    font-weight:700;
+  }
+
+  .current-week.active,
+  .current-week:disabled {
+    opacity:.38;
   }
 
   .week-board-swipe {
@@ -317,43 +310,38 @@
   }
 
   @media (max-width:760px) {
-    .week-shell {
-      gap:7px;
-    }
-
-    .week-nav {
-      padding:6px 8px 5px;
-      border-radius:18px;
-    }
-
-    .week-nav-main {
-      grid-template-columns:38px minmax(0,1fr) 38px;
-      gap:4px;
+    .week-toolbar {
+      grid-template-columns:34px minmax(0, 1fr) 38px 34px;
+      gap:3px;
+      min-height:48px;
+      padding:4px 6px;
+      border-radius:16px;
     }
 
     .week-arrow {
+      width:34px;
+      height:38px;
+      border-radius:12px;
+    }
+
+    .week-selector {
+      height:38px;
+      padding:0 7px;
+      border-radius:12px;
+    }
+
+    .week-title b {
+      font-size:15px;
+    }
+
+    .week-date {
+      font-size:7.5px;
+    }
+
+    .current-week {
       width:38px;
-      height:48px;
-      border-radius:14px;
-    }
-
-    .week-jump {
-      min-height:54px;
-      padding:4px 8px;
-      border-radius:14px;
-    }
-
-    .week-title-row b {
-      font-size:21px;
-    }
-
-    .week-nav-meta {
-      min-height:20px;
-      margin-top:2px;
-    }
-
-    .week-nav-meta button {
-      min-height:20px;
+      height:30px;
+      font-size:8px;
     }
   }
 </style>
