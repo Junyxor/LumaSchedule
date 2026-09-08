@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { CalendarDays, CalendarRange, Download, LayoutGrid, Settings2, Sparkles } from 'lucide-svelte';
+  import { CalendarDays, CalendarRange, Download, GraduationCap, LayoutGrid, Settings2, Sparkles } from 'lucide-svelte';
   import { onDestroy, onMount } from 'svelte';
   import Today from './lib/pages/Today.svelte';
   import Week from './lib/pages/Week.svelte';
+  import Grades from './lib/pages/Grades.svelte';
   import ImportCenter from './lib/pages/ImportCenter.svelte';
   import Widgets from './lib/pages/Widgets.svelte';
   import Settings from './lib/pages/Settings.svelte';
@@ -35,6 +36,7 @@
   const nav = [
     { id: 'today' as PageId, label: '今日', icon: CalendarDays },
     { id: 'week' as PageId, label: '周课表', icon: CalendarRange },
+    { id: 'grades' as PageId, label: '成绩', icon: GraduationCap },
     { id: 'import' as PageId, label: '导入', icon: Download },
     { id: 'widgets' as PageId, label: '小组件', icon: LayoutGrid },
     { id: 'settings' as PageId, label: '设置', icon: Settings2 }
@@ -153,6 +155,8 @@
       <Today courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} preferences={schedulePreferences} />
     {:else if page === 'week'}
       <Week courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} preferences={schedulePreferences} on:changed={loadRuntimeData} />
+    {:else if page === 'grades'}
+      <Grades />
     {:else if page === 'import'}
       <ImportCenter on:imported={loadRuntimeData} />
     {:else if page === 'widgets'}
@@ -163,3 +167,10 @@
   </main>
   <nav class="mobile-nav glass-panel" aria-label="主导航">{#each nav as item}<button class:active={page === item.id} on:click={() => (page = item.id)} aria-label={item.label}><svelte:component this={item.icon} size={20} strokeWidth={1.8} /><span>{item.label}</span></button>{/each}</nav>
 </div>
+
+<style>
+  @media (max-width: 760px) {
+    .mobile-nav { grid-template-columns: repeat(6, 1fr); }
+    .mobile-nav button { font-size: 9px; }
+  }
+</style>
