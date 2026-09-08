@@ -29,9 +29,8 @@
   };
 
   const TIME_STEP_MINUTES = 5;
-  const TIMELINE_PADDING_MINUTES = 30;
-  const MIN_TIMELINE_SPAN = 4 * 60;
   const DEFAULT_DAY_START = 8 * 60;
+  const DEFAULT_DAY_END = 22 * 60;
   const DEFAULT_SECTION_LENGTH = 50;
   const DEFAULT_SECTION_STRIDE = 60;
   const dispatch = createEventDispatcher<{ changed: void }>();
@@ -58,8 +57,8 @@
   let sections: number[] = [];
   let timelineSections: number[] = [];
   let timelineStart = DEFAULT_DAY_START;
-  let timelineEnd = DEFAULT_DAY_START + MIN_TIMELINE_SPAN;
-  let timelineRowCount = MIN_TIMELINE_SPAN / TIME_STEP_MINUTES;
+  let timelineEnd = DEFAULT_DAY_END;
+  let timelineRowCount = (DEFAULT_DAY_END - DEFAULT_DAY_START) / TIME_STEP_MINUTES;
   let timelineGuides: number[] = [];
   let timelineHours: number[] = [];
 
@@ -118,8 +117,8 @@
     if (mode === 'sat' || mode === 'both') included.add(6);
     if (mode === 'sun' || mode === 'both') included.add(7);
     if (mode === 'auto') {
-      if (courses.some((course) => course.day === 6)) included.add(6);
-      if (courses.some((course) => course.day === 7)) included.add(7);
+      if (timeReferenceCourses.some((course) => course.day === 6)) included.add(6);
+      if (timeReferenceCourses.some((course) => course.day === 7)) included.add(7);
     }
     return order.filter((day) => included.has(day));
   }
@@ -179,27 +178,9 @@
     return Math.max(start + TIME_STEP_MINUTES, inferred);
   }
 
-  function paddedTimelineRange(earliest: number, latest: number, hasCourses: boolean) {
-    if (!hasCourses) return { start: DEFAULT_DAY_START, end: DEFAULT_DAY_START + MIN_TIMELINE_SPAN };
-
-    const earliestAllowed = earliest >= DEFAULT_DAY_START
-      ? DEFAULT_DAY_START
-      : Math.max(0, Math.floor((earliest - TIMELINE_PADDING_MINUTES) / 30) * 30);
-    let start = Math.max(earliestAllowed, Math.floor((earliest - TIMELINE_PADDING_MINUTES) / 30) * 30);
-    let end = Math.min(24 * 60, Math.ceil((latest + TIMELINE_PADDING_MINUTES) / 30) * 30);
-
-    if (end - start < MIN_TIMELINE_SPAN) {
-      const center = (start + end) / 2;
-      start = Math.max(earliestAllowed, Math.floor((center - MIN_TIMELINE_SPAN / 2) / 30) * 30);
-      end = Math.min(24 * 60, start + MIN_TIMELINE_SPAN);
-      if (end - start < MIN_TIMELINE_SPAN) start = Math.max(earliestAllowed, end - MIN_TIMELINE_SPAN);
-    }
-
-    return { start, end };
-  }
-
   function timelineRow(minutes: number) {
-    return Math.max(1, Math.floor((minutes - timelineStart) / TIME_STEP_MINUTES) + 1);
+    const offset = Math.max(0, Math.min(timelineEnd - timelineStart, minutes - timelineStart));
+    return Math.floor(offset / TIME_STEP_MINUTES) + 1;
   }
 
   function courseGridPlacement(course: Course) {
@@ -368,34 +349,36 @@
     if (addRequest > 0) newCourse();
   }
 
+  $: timeReferenceCourses = timelineCourses.length ? timelineCourses : courses;
   $: context = weekContext(displayDate ?? now);
   $: weekendMode = normalizedWeekendMode();
   $: visibleDayNumbers = resolveVisibleDayNumbers(weekendMode, context.order);
   $: visibleDays = visibleDayNumbers.map((day) => context.days.get(day)).filter((day): day is NonNullable<typeof day> => Boolean(day));
   $: visibleCourses = courses.filter((course) => visibleDayNumbers.includes(course.day));
   $: dayCount = visibleDayNumbers.length;
-  $: timeReferenceCourses = timelineCourses.length ? timelineCourses : courses;
-  $: sectionCount = visibleCourses.length
-    ? Math.max(1, ...visibleCourses.map((course) => course.endSection || course.startSection || 1))
-    : Math.max(1, preferences.defaultSections || 12);
+  $: sectionCount = Math.max(
+    1,
+    preferences.defaultSections || 12,
+    ...timeReferenceCourses.map((course) => course.endSection || course.startSection || 1)
+  );
   $: sections = Array.from({ length: sectionCount }, (_, i) => i + 1);
-  $: visibleStartMinutes = visibleCourses.map((course) => courseStartMinute(course));
-  $: visibleEndMinutes = visibleCourses.map((course) => courseEndMinute(course));
-  $: earliestVisible = visibleStartMinutes.length ? Math.min(...visibleStartMinutes) : DEFAULT_DAY_START;
-  $: latestVisible = visibleEndMinutes.length ? Math.max(...visibleEndMinutes) : DEFAULT_DAY_START + DEFAULT_SECTION_LENGTH;
-  $: timelineRange = paddedTimelineRange(earliestVisible, latestVisible, visibleCourses.length > 0);
-  $: timelineStart = timelineRange.start;
-  $: timelineEnd = timelineRange.end;
+  $: referenceStartMinutes = timeReferenceCourses.map((course) => courseStartMinute(course));
+  $: referenceEndMinutes = timeReferenceCourses.map((course) => courseEndMinute(course));
+  $: earliestReference = referenceStartMinutes.length ? Math.min(...referenceStartMinutes) : DEFAULT_DAY_START;
+  $: latestReference = referenceEndMinutes.length ? Math.max(...referenceEndMinutes) : DEFAULT_DAY_END;
+  $: timelineStart = Math.max(0, Math.floor(Math.min(DEFAULT_DAY_START, earliestReference) / 30) * 30);
+  $: timelineEnd = Math.min(24 * 60, Math.ceil(Math.max(DEFAULT_DAY_END, latestReference) / 30) * 30);
   $: timelineSections = sections.filter((section) => {
     const minute = inferredSectionStart(section);
     return minute >= timelineStart && minute < timelineEnd;
   });
   $: timelineRowCount = Math.max(1, Math.ceil((timelineEnd - timelineStart) / TIME_STEP_MINUTES));
-  $: timelineGuides = Array.from(
-    { length: Math.floor((timelineEnd - Math.ceil(timelineStart / 30) * 30) / 30) + 1 },
-    (_, index) => Math.ceil(timelineStart / 30) * 30 + index * 30
-  ).filter((minute) => minute >= timelineStart && minute <= timelineEnd);
-  $: timelineHours = timelineGuides.filter((minute) => minute % 60 === 0);
+  $: firstGuide = Math.ceil(timelineStart / 60) * 60;
+  $: timelineHours = Array.from(
+    { length: Math.max(0, Math.ceil((timelineEnd - firstGuide) / 60)) },
+    (_, index) => firstGuide + index * 60
+  ).filter((minute) => minute >= timelineStart && minute < timelineEnd);
+  $: timelineGuides = timelineHours;
   $: firstVisibleDay = visibleDays[0];
   $: lastVisibleDay = visibleDays[visibleDays.length - 1];
   $: rangeLabel = firstVisibleDay && lastVisibleDay
@@ -425,7 +408,7 @@
   <div
     class="week-board time-proportional"
     class:compact={preferences.compactMode}
-    style={`--day-count:${dayCount};--axis-width:46px;--time-row-count:${timelineRowCount};--time-step-height:${preferences.compactMode ? 4.4 : 5}px`}
+    style={`--day-count:${dayCount};--axis-width:42px;--time-row-count:${timelineRowCount};--time-step-height:${preferences.compactMode ? 3 : 3.4}px`}
   >
     <div class="week-header">
       <div class="corner">{preferences.showTime ? '时间' : '节次'}</div>
@@ -440,11 +423,7 @@
     <div class="week-scroll">
       <div class="week-time-grid">
         {#each timelineGuides as minute}
-          <div
-            class="time-guide"
-            class:major={minute % 60 === 0}
-            style={`grid-column:1 / -1;grid-row:${timelineRow(minute)}`}
-          ></div>
+          <div class="time-guide major" style={`grid-column:1 / -1;grid-row:${timelineRow(minute)}`}></div>
         {/each}
 
         {#if preferences.showTime}
@@ -652,6 +631,7 @@
     display: grid;
     grid-template-columns: var(--axis-width) repeat(var(--day-count), minmax(0, 1fr));
     grid-template-rows: repeat(var(--time-row-count), var(--time-step-height));
+    grid-auto-rows: 0;
     width: 100%;
     min-width: 0;
     min-height: calc(var(--time-row-count) * var(--time-step-height));
@@ -685,14 +665,16 @@
     pointer-events: none;
   }
 
-  .section-label {
-    font-size: 9.5px;
-  }
+  .section-label { font-size: 9.5px; }
 
   .week-course {
     position: relative;
     min-width: 0;
     min-height: 0;
+    width: auto;
+    max-width: none;
+    align-self: stretch;
+    justify-self: stretch;
     z-index: 3;
     margin: 2px 1.5px;
     padding: 5px 4px;
@@ -720,10 +702,10 @@
 
   .week-course b {
     display: block;
-    overflow: visible;
+    overflow: hidden;
     white-space: normal;
-    word-break: break-word;
-    overflow-wrap: anywhere;
+    word-break: normal;
+    overflow-wrap: break-word;
     font-size: 11.2px;
     line-height: 1.16;
     font-weight: 760;
@@ -731,10 +713,10 @@
 
   .week-course span {
     display: block;
-    overflow: visible;
+    overflow: hidden;
     white-space: normal;
-    word-break: break-word;
-    overflow-wrap: anywhere;
+    word-break: normal;
+    overflow-wrap: break-word;
     font-size: 9px;
     line-height: 1.12;
     font-weight: 540;
@@ -743,6 +725,7 @@
 
   .week-course .course-credit {
     display: block;
+    margin-top: auto;
     font-size: 8.7px;
     line-height: 1.08;
     font-weight: 720;
