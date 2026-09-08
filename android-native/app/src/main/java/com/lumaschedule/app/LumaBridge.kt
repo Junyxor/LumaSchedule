@@ -86,6 +86,14 @@ class LumaBridge(
 
             "get_schedule_snapshot" -> database.getScheduleSnapshot().toString()
 
+            "get_schedule_preferences" -> database.getSchedulePreferences().toString()
+
+            "save_schedule_preferences" -> {
+                val result = database.saveSchedulePreferences(args.getJSONObject("preferences"))
+                resyncRemindersIfEnabled()
+                result.toString()
+            }
+
             "save_schedule_course" -> {
                 val id = database.saveScheduleCourse(args.getJSONObject("course"))
                 resyncRemindersIfEnabled()
@@ -103,8 +111,13 @@ class LumaBridge(
                 "null"
             }
 
+            "preview_import_bundle" -> database.previewImport(args.getJSONObject("bundle")).toString()
+
             "commit_import_bundle" -> {
-                val result = database.commitImport(args.getJSONObject("bundle"))
+                val result = database.commitImport(
+                    args.getJSONObject("bundle"),
+                    args.optString("mode", "new")
+                )
                 resyncRemindersIfEnabled()
                 result.toString()
             }
