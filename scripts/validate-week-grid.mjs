@@ -102,6 +102,11 @@ if (/\.mobile-nav\s*\{[^}]*width:\s*100%/s.test(runtime)) {
   process.exit(1);
 }
 
+if (!runtime.includes('.page-week .week-time-grid') || !runtime.includes('grid-auto-rows: 0;')) {
+  console.error('Week scroll regression: implicit grid rows must not add a blank tail below the timetable.');
+  process.exit(1);
+}
+
 const readableMarkers = [
   '.page-week.week-shell',
   'overflow: visible !important',
