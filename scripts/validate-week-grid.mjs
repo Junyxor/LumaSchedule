@@ -3,6 +3,8 @@ import fs from 'node:fs';
 const core = fs.readFileSync('src/lib/pages/WeekCore.svelte', 'utf8');
 const week = fs.readFileSync('src/lib/pages/Week.svelte', 'utf8');
 const runtime = fs.readFileSync('src/styles/mobile-runtime.css', 'utf8');
+const readable = fs.readFileSync('src/styles/week-readable-layout.css', 'utf8');
+const appCss = fs.readFileSync('src/app.css', 'utf8');
 
 const requiredCore = [
   'class="week-body-grid"',
@@ -45,4 +47,27 @@ if (runtime.includes('.week-scroll::after')) {
   process.exit(1);
 }
 
-console.log('Week grid layout contract OK');
+const readableMarkers = [
+  '.page-week.week-shell',
+  'overflow: visible !important',
+  '.page-week .week-board .week-header',
+  'position: sticky !important',
+  '.page-week .week-body-grid .week-course span',
+  'text-overflow: clip !important',
+  'white-space: normal !important',
+  '--axis-width: 44px !important'
+];
+
+for (const marker of readableMarkers) {
+  if (!readable.includes(marker)) {
+    console.error(`Week readability regression: missing ${marker}`);
+    process.exit(1);
+  }
+}
+
+if (!appCss.includes("@import './styles/week-readable-layout.css';")) {
+  console.error('Week readability regression: final mobile timetable overrides are not loaded.');
+  process.exit(1);
+}
+
+console.log('Week grid and readability contract OK');
