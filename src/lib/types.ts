@@ -6,6 +6,7 @@ export interface ScheduleSnapshot { courses: Course[]; hasSchedule: boolean; ter
 export interface GlassSettings { blur: number; opacity: number; saturation: number; highlight: number; refraction: number; noise: number; motion: boolean; }
 export interface CourseReminderSettings { enabled: boolean; offsetMinutes: number; }
 export interface ReminderSyncReport { enabled: boolean; futureCount: number; scheduledCount: number; cancelledCount: number; skippedCount: number; }
+export type WeekendMode = 'auto' | 'weekdays' | 'sat' | 'sun' | 'both';
 export interface SchedulePreferences {
   hasSchedule: boolean;
   termName: string;
@@ -13,7 +14,7 @@ export interface SchedulePreferences {
   weekCount: number;
   timezone: string;
   weekStartsOn: number;
-  showWeekend: boolean;
+  weekendMode: WeekendMode;
   showTeacher: boolean;
   showRoom: boolean;
   showTime: boolean;
