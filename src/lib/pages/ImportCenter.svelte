@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowLeft, BookOpenCheck, Building2, CalendarSync, CheckCircle2, ChevronRight, ExternalLink, FileJson2, FileSpreadsheet, LoaderCircle, Search, ShieldCheck, TriangleAlert, UploadCloud, X } from 'lucide-svelte';
+  import { ArrowLeft, BookOpenCheck, Building2, CalendarSync, Check, CheckCircle2, ChevronRight, ExternalLink, FileJson2, FileSpreadsheet, LoaderCircle, Search, ShieldCheck, TriangleAlert, UploadCloud, X } from 'lucide-svelte';
   import ConfirmSheet from '../components/ConfirmSheet.svelte';
   import {
     closeShiguangSession,
@@ -36,8 +36,10 @@
   let loading = false;
   let dragOver = false;
   let preview: ImportBundle | null = null;
+  let selectedCourseIndexes: number[] = [];
   let importDiff: ImportDiff | null = null;
   let diffLoading = false;
+  let diffRevision = 0;
   let importMode: ImportMode = 'new';
   let overwriteConfirmOpen = false;
   let selectedFile = '';
@@ -63,6 +65,8 @@
   let sheetDragStartY = 0;
   let sheetPointerId: number | null = null;
 
+  $: selectedCount = selectedCourseIndexes.length;
+  $: allSelected = !!preview && preview.courses.length > 0 && selectedCount === preview.courses.length;
   $: normalizedSchoolQuery = schoolQuery.trim().toLowerCase();
   $: filteredSchools = schools
     .filter((school) => school.id !== 'GLOBAL_TOOLS' && !genericSchoolIds.has(school.id))
@@ -94,27 +98,63 @@
     fileInput.click();
   }
 
+  function selectedBundle(): ImportBundle | null {
+    if (!preview || !selectedCourseIndexes.length) return null;
+    const selected = new Set(selectedCourseIndexes);
+    return { ...preview, courses: preview.courses.filter((_, index) => selected.has(index)) };
+  }
+
+  async function refreshDiff(resetMode = false) {
+    const bundle = selectedBundle();
+    const revision = ++diffRevision;
+    importDiff = null;
+    error = '';
+    if (!bundle) {
+      diffLoading = false;
+      return;
+    }
+    diffLoading = true;
+    try {
+      const next = await previewImport(bundle);
+      if (revision !== diffRevision) return;
+      importDiff = next;
+      if (resetMode) importMode = next.hasExistingSchedule ? 'merge' : 'new';
+      else if (!next.hasExistingSchedule && importMode !== 'new') importMode = 'new';
+    } catch (e) {
+      if (revision !== diffRevision) return;
+      error = `导入内容已解析，但差异分析失败：${friendlyError(e)}`;
+      importMode = 'new';
+    } finally {
+      if (revision === diffRevision) diffLoading = false;
+    }
+  }
+
   async function preparePreview(bundle: ImportBundle, sourceLabel: string) {
     preview = bundle;
+    selectedCourseIndexes = bundle.courses.map((_, index) => index);
     selectedFile = sourceLabel;
     importDiff = null;
     error = '';
     committed = '';
-    diffLoading = true;
-    try {
-      importDiff = await previewImport(bundle);
-      importMode = importDiff.hasExistingSchedule ? 'merge' : 'new';
-    } catch (e) {
-      error = `导入内容已解析，但差异分析失败：${friendlyError(e)}`;
-      importMode = 'new';
-    } finally {
-      diffLoading = false;
-    }
+    await refreshDiff(true);
+  }
+
+  function toggleCourse(index: number) {
+    selectedCourseIndexes = selectedCourseIndexes.includes(index)
+      ? selectedCourseIndexes.filter((value) => value !== index)
+      : [...selectedCourseIndexes, index].sort((a, b) => a - b);
+    void refreshDiff(false);
+  }
+
+  function toggleAllCourses() {
+    if (!preview) return;
+    selectedCourseIndexes = allSelected ? [] : preview.courses.map((_, index) => index);
+    void refreshDiff(false);
   }
 
   async function loadFile(file?: File) {
     if (!file) return;
-    error=''; committed=''; preview=null; importDiff=null; selectedFile=file.name;
+    error=''; committed=''; preview=null; importDiff=null; selectedCourseIndexes=[]; selectedFile=file.name;
     const format=formatFor(file.name);
     if (!['json','ics','csv','tsv','cses'].includes(format)) {
       error = `暂不识别 .${format || 'unknown'} 文件。`;
@@ -129,16 +169,21 @@
   }
 
   async function commitWithMode(mode: ImportMode) {
-    if (!preview) return;
+    const bundle = selectedBundle();
+    if (!bundle) {
+      error = '至少选择一条课程记录再导入。';
+      return;
+    }
     loading=true; error='';
     try {
-      const result=await commitImport(preview, mode);
+      const result=await commitImport(bundle, mode);
       committed = mode === 'merge'
         ? `已合并到当前课表：新增 ${result.addedCount} 个时段，跳过 ${result.skippedCount} 个重复项。`
         : mode === 'overwrite'
           ? `已覆盖当前课表：写入 ${result.meetingCount} 个时段，替换 ${result.removedCount} 个旧时段。`
           : `已创建新课表：${result.courseCount} 门课程 / ${result.meetingCount} 个上课时段。`;
       preview=null;
+      selectedCourseIndexes=[];
       importDiff=null;
       overwriteConfirmOpen=false;
       dispatch('imported');
@@ -147,13 +192,14 @@
   }
 
   function commitPreview() {
-    if (!preview || loading || diffLoading) return;
+    if (!preview || !selectedCount || loading || diffLoading) return;
     if (importMode === 'overwrite' && importDiff?.hasExistingSchedule) overwriteConfirmOpen = true;
     else void commitWithMode(importMode);
   }
 
   function closePreview() {
     preview = null;
+    selectedCourseIndexes=[];
     importDiff = null;
     error = '';
   }
@@ -240,10 +286,7 @@
 
   async function beginSmartCompatibility(){
     if(shiguangLoading || activeSession)return;
-    if(!compatibilityUrl.trim()){
-      shiguangError='先粘贴学校官方教务系统地址。';
-      return;
-    }
+    if(!compatibilityUrl.trim()){ shiguangError='先粘贴学校官方教务系统地址。'; return; }
     shiguangError=''; shiguangLoading=true; sessionMessage='正在准备智能兼容登录环境…';
     try{
       activeSession=await startSmartCompatibilityImport(compatibilityUrl, schoolQuery);
@@ -255,10 +298,7 @@
 
   async function beginManualCompatibility(){
     if(shiguangLoading || activeSession)return;
-    if(!compatibilityUrl.trim()){
-      shiguangError='先粘贴学校官方教务系统地址。';
-      return;
-    }
+    if(!compatibilityUrl.trim()){ shiguangError='先粘贴学校官方教务系统地址。'; return; }
     shiguangError=''; shiguangLoading=true; sessionMessage='正在准备指定教务类型的登录环境…';
     try{
       activeSession=await startCompatibilityImport(compatibilityUrl,compatibilityFamily,schoolQuery);
@@ -323,24 +363,30 @@
     <article class="import-preview content-surface">
       <div class="preview-head"><div class="preview-ok"><CheckCircle2 size={20}/></div><div><span class="eyebrow">导入预览</span><h2>已识别 {preview.courses.length} 条课程记录</h2><p>{selectedFile} · 来源 {preview.source}</p></div><button class="icon-ghost" on:click={closePreview} aria-label="关闭导入预览"><X size={18}/></button></div>
       {#if diffLoading}
-        <div class="diff-loading"><LoaderCircle class="spin" size={18}/> 正在与当前课表比较…</div>
+        <div class="diff-loading"><LoaderCircle class="spin" size={18}/> 正在按已选课程重新比较…</div>
       {:else if importDiff}
-        <div class="diff-grid" aria-label="导入差异">
-          <div><b>{importDiff.newCount}</b><span>新增时段</span></div><div><b>{importDiff.duplicateCount}</b><span>重复跳过</span></div><div class:warn={importDiff.conflictCount>0}><b>{importDiff.conflictCount}</b><span>时间冲突</span></div><div><b>{importDiff.removeCount}</b><span>覆盖会移除</span></div>
-        </div>
+        <div class="diff-grid" aria-label="导入差异"><div><b>{importDiff.newCount}</b><span>新增时段</span></div><div><b>{importDiff.duplicateCount}</b><span>重复跳过</span></div><div class:warn={importDiff.conflictCount>0}><b>{importDiff.conflictCount}</b><span>时间冲突</span></div><div><b>{importDiff.removeCount}</b><span>覆盖会移除</span></div></div>
         <div class="import-mode-picker">
           <div><b>导入方式</b><span>{importDiff.hasExistingSchedule ? `当前已有 ${importDiff.existingMeetingCount} 个课程时段` : '当前没有课表'}</span></div>
-          <div class="mode-options">
-            <button class:active={importMode==='new'} on:click={()=>importMode='new'}><b>新建</b><small>保留当前课表，创建新课表</small></button>
-            <button class:active={importMode==='merge'} disabled={!importDiff.hasExistingSchedule} on:click={()=>importMode='merge'}><b>合并</b><small>新增课程，重复项自动跳过</small></button>
-            <button class:active={importMode==='overwrite'} disabled={!importDiff.hasExistingSchedule} on:click={()=>importMode='overwrite'}><b>覆盖</b><small>用本次导入替换当前课表</small></button>
-          </div>
+          <div class="mode-options"><button class:active={importMode==='new'} on:click={()=>importMode='new'}><b>新建</b><small>保留当前课表，创建新课表</small></button><button class:active={importMode==='merge'} disabled={!importDiff.hasExistingSchedule} on:click={()=>importMode='merge'}><b>合并</b><small>新增课程，重复项自动跳过</small></button><button class:active={importMode==='overwrite'} disabled={!importDiff.hasExistingSchedule} on:click={()=>importMode='overwrite'}><b>覆盖</b><small>用本次导入替换当前课表</small></button></div>
           {#if importMode==='merge' && importDiff.conflictCount>0}<div class="conflict-note"><TriangleAlert size={14}/> 检测到 {importDiff.conflictCount} 个时间冲突；合并后会保留两边课程。</div>{/if}
           {#if importMode==='overwrite' && importDiff.removeCount>0}<div class="overwrite-note">覆盖将移除当前课表中 {importDiff.removeCount} 个本次导入不存在的时段。</div>{/if}
         </div>
       {/if}
-      <div class="preview-courses">{#each preview.courses.slice(0,6) as course}<div class="preview-course"><span>周{course.weekday}</span><div><b>{course.name}</b><small>第 {course.startSection}–{course.endSection} 节 · {course.location||'教室未提供'}</small></div><em>{course.weeks.length} 周</em></div>{/each}{#if preview.courses.length>6}<div class="preview-more">还有 {preview.courses.length-6} 条记录</div>{/if}</div>
-      <div class="preview-actions"><button class="secondary-button" on:click={closePreview}>取消</button><button class="primary-button" on:click={commitPreview} disabled={loading||diffLoading}>{loading?'正在导入…':importMode==='merge'?'确认合并':importMode==='overwrite'?'确认覆盖':'创建课表'}</button></div>
+
+      <div class="preview-select-toolbar"><div><b>选择要导入的课程</b><span>已选 {selectedCount} / {preview.courses.length}</span></div><button on:click={toggleAllCourses}>{allSelected ? '取消全选' : '全选'}</button></div>
+      <div class="preview-courses selectable-list">
+        {#each preview.courses as course, index}
+          <button class:selected={selectedCourseIndexes.includes(index)} class="preview-course selectable-course" on:click={()=>toggleCourse(index)} aria-pressed={selectedCourseIndexes.includes(index)}>
+            <span class="preview-check">{#if selectedCourseIndexes.includes(index)}<Check size={14} strokeWidth={2.8}/>{/if}</span>
+            <span class="preview-day">周{course.weekday}</span>
+            <div><b>{course.name}</b><small>{course.startTime && course.endTime ? `${course.startTime}–${course.endTime}` : `第 ${course.startSection}–${course.endSection} 节`} · {course.location||'教室未提供'}{course.teacher ? ` · ${course.teacher}` : ''}</small></div>
+            <em>{course.weeks.length} 周</em>
+          </button>
+        {/each}
+      </div>
+      {#if !selectedCount}<div class="selection-warning"><TriangleAlert size={14}/> 当前没有选择任何课程。</div>{/if}
+      <div class="preview-actions"><button class="secondary-button" on:click={closePreview}>取消</button><button class="primary-button" on:click={commitPreview} disabled={loading||diffLoading||!selectedCount}>{loading?'正在导入…':importMode==='merge'?'确认合并':importMode==='overwrite'?'确认覆盖':`导入已选 ${selectedCount} 条`}</button></div>
     </article>
   {/if}
 
@@ -359,22 +405,11 @@
         <div class="adapter-list">{#if shiguangLoading}<div class="adapter-loading"><LoaderCircle class="spin" size={20}/> 正在读取登录方式…</div>{:else}{#each adapters as adapter}<button class="adapter-row" on:click={()=>void beginSchoolImport(adapter)} disabled={!adapter.importUrl}><span class="adapter-row-icon"><CalendarSync size={18}/></span><div><b>{adapter.adapterName}</b><p>{adapter.description}</p></div><ChevronRight size={17}/></button>{/each}{#if !adapters.length}<div class="adapter-empty">这个学校暂时没有可用的专用网页登录方式。返回后可以粘贴官方教务网址使用智能兼容。</div>{/if}{/if}</div>
       {:else}
         <div class="school-search"><Search size={17}/><input bind:this={schoolSearchInput} bind:value={schoolQuery} aria-label="学校名称" placeholder="输入学校名称"/></div>
-        {#if shiguangLoading}
-          <div class="adapter-loading"><LoaderCircle class="spin" size={20}/> 正在读取学校索引…</div>
-        {:else if shiguangError && schools.length===0}
-          <div class="adapter-empty adapter-index-error"><TriangleAlert size={16}/> 学校索引读取失败。仍可使用文件导入，或稍后重试。</div>
+        {#if shiguangLoading}<div class="adapter-loading"><LoaderCircle class="spin" size={20}/> 正在读取学校索引…</div>
+        {:else if shiguangError && schools.length===0}<div class="adapter-empty adapter-index-error"><TriangleAlert size={16}/> 学校索引读取失败。仍可使用文件导入，或稍后重试。</div>
         {:else}
           {#if showCompatibility}
-            <div class="compatibility-panel">
-              <div class="compatibility-head"><div><b>没找到学校？智能兼容</b><span>不需要知道正方、青果还是 URP。粘贴学校官方教务网址即可。</span></div><a href={bingUrl}><ExternalLink size={13}/> 搜索官网</a></div>
-              <div class="compatibility-url"><input bind:value={compatibilityUrl} inputmode="url" placeholder="https://学校官方教务域名/"/><button on:click={()=>void beginSmartCompatibility()} disabled={shiguangLoading}>智能识别并登录</button></div>
-              <button class="advanced-toggle" on:click={()=>advancedCompatibility=!advancedCompatibility}>{advancedCompatibility?'收起高级选项':'高级选项：手动选择教务类型'}</button>
-              {#if advancedCompatibility}
-                <div class="compatibility-families">{#each compatibilityFamilies as family}<button class:active={compatibilityFamily===family.id} on:click={()=>compatibilityFamily=family.id}>{family.label}</button>{/each}</div>
-                <button class="manual-open" on:click={()=>void beginManualCompatibility()} disabled={shiguangLoading}>按所选类型打开</button>
-              {/if}
-              <small><ShieldCheck size={12}/> 只粘贴你确认过的学校官方域名。搜索结果不会自动获得登录权限。</small>
-            </div>
+            <div class="compatibility-panel"><div class="compatibility-head"><div><b>没找到学校？智能兼容</b><span>不需要知道正方、青果还是 URP。粘贴学校官方教务网址即可。</span></div><a href={bingUrl}><ExternalLink size={13}/> 搜索官网</a></div><div class="compatibility-url"><input bind:value={compatibilityUrl} inputmode="url" placeholder="https://学校官方教务域名/"/><button on:click={()=>void beginSmartCompatibility()} disabled={shiguangLoading}>智能识别并登录</button></div><button class="advanced-toggle" on:click={()=>advancedCompatibility=!advancedCompatibility}>{advancedCompatibility?'收起高级选项':'高级选项：手动选择教务类型'}</button>{#if advancedCompatibility}<div class="compatibility-families">{#each compatibilityFamilies as family}<button class:active={compatibilityFamily===family.id} on:click={()=>compatibilityFamily=family.id}>{family.label}</button>{/each}</div><button class="manual-open" on:click={()=>void beginManualCompatibility()} disabled={shiguangLoading}>按所选类型打开</button>{/if}<small><ShieldCheck size={12}/> 只粘贴你确认过的学校官方域名。搜索结果不会自动获得登录权限。</small></div>
           {/if}
           <div class="school-list">{#each filteredSchools as school}<button on:click={()=>void chooseSchool(school)}><span>{school.initial.slice(0,1)||'校'}</span><div><b>{school.name}</b></div><ChevronRight size={16}/></button>{/each}{#if normalizedSchoolQuery && !filteredSchools.length && !showCompatibility}<div class="adapter-empty">没有找到匹配学校，可以换关键词重试。</div>{/if}</div>
         {/if}
@@ -385,16 +420,7 @@
   </div>
 {/if}
 
-<ConfirmSheet
-  open={overwriteConfirmOpen}
-  title="覆盖当前课表"
-  message={`将用本次导入替换当前课表${importDiff?.removeCount ? `，预计移除 ${importDiff.removeCount} 个旧时段` : ''}。建议重要课表先导出备份。`}
-  confirmText="确认覆盖"
-  danger
-  busy={loading}
-  on:cancel={()=>overwriteConfirmOpen=false}
-  on:confirm={()=>void commitWithMode('overwrite')}
-/>
+<ConfirmSheet open={overwriteConfirmOpen} title="覆盖当前课表" message={`将用已选择的 ${selectedCount} 条记录替换当前课表${importDiff?.removeCount ? `，预计移除 ${importDiff.removeCount} 个旧时段` : ''}。建议重要课表先导出备份。`} confirmText="确认覆盖" danger busy={loading} on:cancel={()=>overwriteConfirmOpen=false} on:confirm={()=>void commitWithMode('overwrite')} />
 
 <style>
   .diff-loading { margin:12px 0; min-height:44px; border-radius:14px; display:flex; align-items:center; justify-content:center; gap:8px; color:rgba(60,60,67,.62); background:rgba(118,118,128,.06); font-size:11px; }
@@ -418,6 +444,26 @@
   .conflict-note,.overwrite-note { border-radius:12px; padding:9px 10px; font-size:9px; line-height:1.5; }
   .conflict-note { display:flex; align-items:flex-start; gap:6px; color:#93631d; background:rgba(221,153,58,.09); }
   .overwrite-note { color:#a24857; background:rgba(220,70,84,.07); }
+
+  .preview-select-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:12px 0 8px; }
+  .preview-select-toolbar > div { min-width:0; }
+  .preview-select-toolbar b,.preview-select-toolbar span { display:block; }
+  .preview-select-toolbar b { font-size:12px; }
+  .preview-select-toolbar span { margin-top:2px; font-size:9px; color:rgba(60,60,67,.54); }
+  .preview-select-toolbar button { flex:none; min-height:32px; padding:0 11px; border:0; border-radius:999px; color:#5751c9; background:rgba(91,86,214,.09); font-size:9px; font-weight:650; }
+  .selectable-list { max-height:min(46dvh,520px); overflow-y:auto; overscroll-behavior:contain; border:1px solid rgba(60,60,67,.07); border-radius:16px; background:rgba(118,118,128,.025); }
+  .selectable-course { width:100%; min-width:0; display:grid; grid-template-columns:24px 32px minmax(0,1fr) auto; align-items:center; gap:8px; border:0; border-bottom:1px solid rgba(60,60,67,.07); border-radius:0; padding:12px 10px; background:transparent; color:inherit; text-align:left; font:inherit; }
+  .selectable-course:last-child { border-bottom:0; }
+  .selectable-course.selected { background:rgba(91,86,214,.055); }
+  .preview-check { width:20px; height:20px; border-radius:7px; display:grid; place-items:center; border:1px solid rgba(60,60,67,.18); color:white; background:rgba(255,255,255,.55); }
+  .selectable-course.selected .preview-check { border-color:#5b56d6; background:#5b56d6; }
+  .preview-day { font-size:10px; color:rgba(60,60,67,.58); white-space:nowrap; }
+  .selectable-course > div { min-width:0; }
+  .selectable-course b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; }
+  .selectable-course small { display:block; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:rgba(60,60,67,.54); font-size:9px; }
+  .selectable-course em { padding:5px 8px; border-radius:999px; background:rgba(118,118,128,.065); color:rgba(60,60,67,.56); font-size:9px; font-style:normal; white-space:nowrap; }
+  .selection-warning { margin:8px 0 0; display:flex; align-items:center; gap:6px; padding:9px 10px; border-radius:12px; color:#a24857; background:rgba(220,70,84,.07); font-size:9px; }
+
   .compatibility-panel { flex:0 0 auto; display:grid; gap:9px; padding:12px; border:1px solid rgba(91,86,214,.13); border-radius:17px; background:rgba(91,86,214,.055); }
   .compatibility-head { display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
   .compatibility-head > div { min-width:0; }
@@ -445,5 +491,7 @@
     .mode-options button { min-height:52px; }
     .compatibility-head { align-items:center; }
     .compatibility-url { grid-template-columns:1fr; }
+    .selectable-list { max-height:52dvh; }
+    .selectable-course { grid-template-columns:24px 28px minmax(0,1fr) auto; gap:7px; padding:11px 8px; }
   }
 </style>
