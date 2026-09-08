@@ -222,8 +222,8 @@
     line-height: 1.6 !important;
   }
 
-  /* Weekly cards deliberately prioritise recognition over metadata density. The
-     detail sheet still contains teacher, room, credit and exact time. */
+  /* Week cards reserve their limited space for the full course title. Secondary
+     metadata lives in the detail sheet so a long title is never cut to two lines. */
   .page-week .week-time-grid .week-course {
     display: flex !important;
     flex-direction: column !important;
@@ -236,7 +236,7 @@
     box-sizing: border-box !important;
     gap: 2px !important;
     margin: 2px 2px !important;
-    padding: 6px 5px !important;
+    padding: 5px 4px !important;
     border: 1px solid rgba(62, 60, 78, .045) !important;
     border-radius: 10px !important;
     overflow: hidden !important;
@@ -252,17 +252,15 @@
   .page-week .week-time-grid .week-course.orange { background: linear-gradient(145deg, #f8cdb2, #e9a177) !important; }
 
   .page-week .week-time-grid .week-course b {
-    display: -webkit-box !important;
-    -webkit-box-orient: vertical !important;
-    -webkit-line-clamp: 2 !important;
-    overflow: hidden !important;
+    display: block !important;
+    overflow: visible !important;
     white-space: normal !important;
     word-break: break-word !important;
     overflow-wrap: anywhere !important;
-    font-size: 10.5px !important;
-    line-height: 1.18 !important;
+    font-size: 9.6px !important;
+    line-height: 1.08 !important;
     font-weight: 780 !important;
-    letter-spacing: -.015em !important;
+    letter-spacing: -.03em !important;
     color: #26252d !important;
   }
 
@@ -276,7 +274,10 @@
     padding: 4px 3px !important;
     border-radius: 8px !important;
   }
-  .page-week .week-board.compact .week-course b { font-size: 9.6px !important; }
+  .page-week .week-board.compact .week-course b {
+    font-size: 8.9px !important;
+    line-height: 1.05 !important;
+  }
 }
 
 @media (max-width: 390px) {
@@ -291,4 +292,5 @@
   .page-week .week-board .week-header > div span { font-size: 9.5px !important; }
   .page-week .week-board .week-header > div b { font-size: 12.5px !important; }
   .page-week .time-label { font-size: 9px !important; padding-right: 6px !important; }
+  .page-week .week-time-grid .week-course b { font-size: 8.8px !important; line-height: 1.04 !important; }
 }
