@@ -11,6 +11,7 @@
 @import './styles/import-mobile-fixes.css';
 @import './styles/settings-mobile-fixes.css';
 @import './styles/week-readable-layout.css';
+@import './styles/week-card-density.css';
 
 html, body, #app, .app-shell {
   touch-action: pan-x pan-y;
