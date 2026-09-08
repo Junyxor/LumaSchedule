@@ -101,6 +101,25 @@ for (const marker of viewportMarkers) {
   }
 }
 
+const alignmentMarkers = [
+  'grid-template-columns: var(--axis-width) repeat(var(--day-count), minmax(0, 1fr)) !important',
+  'width: 100% !important',
+  'padding-left: 0 !important',
+  'padding-right: 0 !important',
+  'justify-self: stretch !important',
+  'text-align: center !important'
+];
+for (const marker of alignmentMarkers) {
+  if (!readable.includes(marker)) {
+    console.error(`Week axis alignment regression: missing ${marker}`);
+    process.exit(1);
+  }
+}
+
+if (/\.page-week \.week-board \.week-scroll\s*\{[^}]*padding-left:\s*(?!0\b)/s.test(readable)) {
+  console.error('Week axis alignment regression: scrolling body must not carry a left gutter separate from the header.');
+  process.exit(1);
+}
 if (/\.page-week \.week-board-swipe\s*\{[^}]*margin-inline:\s*-\d/s.test(readable)) {
   console.error('Week mobile regression: timetable must not bleed beyond page edges.');
   process.exit(1);
@@ -161,4 +180,4 @@ if (!appCss.includes("@import './styles/week-readable-layout.css';")) {
   process.exit(1);
 }
 
-console.log('Week viewport and selectable import contracts OK');
+console.log('Week viewport, axis alignment, and selectable import contracts OK');
