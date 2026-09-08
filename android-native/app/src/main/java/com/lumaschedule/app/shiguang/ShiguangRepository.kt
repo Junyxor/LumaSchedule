@@ -285,7 +285,6 @@ class ShiguangRepository(private val context: Context) {
                 school.name,
                 school.resourceFolder,
                 id,
-                raw["adapter_id"].orEmpty().ifBlank { id },
                 raw["adapter_name"].orEmpty().ifBlank { id },
                 raw["category"].orEmpty(),
                 raw["asset_js_path"].orEmpty(),
