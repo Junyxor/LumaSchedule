@@ -26,6 +26,13 @@ import type {
 } from './types';
 import { importText } from './importers';
 import { invokeNative, unwrap } from './nativeBridge';
+import {
+  forgetCourseCredit,
+  hydrateCourseCredits,
+  hydrateGradeCredits,
+  rememberCourseCredit,
+  rememberImportCredits
+} from './courseCredits';
 
 export { importText };
 
@@ -47,8 +54,9 @@ export async function listScheduleCourses(): Promise<Course[]> {
   return (await getScheduleSnapshot()).courses;
 }
 
-export function getScheduleSnapshot() {
-  return invokeNative<ScheduleSnapshot>('get_schedule_snapshot');
+export async function getScheduleSnapshot() {
+  const snapshot = await invokeNative<ScheduleSnapshot>('get_schedule_snapshot');
+  return { ...snapshot, courses: hydrateCourseCredits(snapshot.courses || []) };
 }
 
 export function getSchedulePreferences() {
@@ -60,11 +68,14 @@ export function saveSchedulePreferences(preferences: SchedulePreferences) {
 }
 
 export async function saveScheduleCourse(course: CourseMutation) {
-  return unwrap(await invokeNative<{ value: string }>('save_schedule_course', { course }));
+  const id = unwrap(await invokeNative<{ value: string }>('save_schedule_course', { course }));
+  rememberCourseCredit(id, course.name, course.credit);
+  return id;
 }
 
-export function deleteScheduleCourse(id: string) {
-  return invokeNative<void>('delete_schedule_course', { id });
+export async function deleteScheduleCourse(id: string, courseName = '') {
+  await invokeNative<void>('delete_schedule_course', { id });
+  forgetCourseCredit(id, courseName);
 }
 
 export async function saveGlassSettings(settings: GlassSettings) {
@@ -72,8 +83,9 @@ export async function saveGlassSettings(settings: GlassSettings) {
   await invokeNative<void>('save_glass_settings', { settings }).catch(() => undefined);
 }
 
-export function getGradeSnapshot() {
-  return invokeNative<GradeSnapshot>('get_grade_snapshot');
+export async function getGradeSnapshot() {
+  const snapshot = await invokeNative<GradeSnapshot>('get_grade_snapshot');
+  return { ...snapshot, records: hydrateGradeCredits(snapshot.records || []) };
 }
 
 export function commitGradeBundle(bundle: GradeImportBundle) {
@@ -84,8 +96,10 @@ export function previewImport(bundle: ImportBundle) {
   return invokeNative<ImportDiff>('preview_import_bundle', { bundle });
 }
 
-export function commitImport(bundle: ImportBundle, mode: ImportMode = 'new') {
-  return invokeNative<ImportCommitResult>('commit_import_bundle', { bundle, mode });
+export async function commitImport(bundle: ImportBundle, mode: ImportMode = 'new') {
+  const result = await invokeNative<ImportCommitResult>('commit_import_bundle', { bundle, mode });
+  rememberImportCredits(bundle);
+  return result;
 }
 
 export async function ensureNotificationPermission() {
