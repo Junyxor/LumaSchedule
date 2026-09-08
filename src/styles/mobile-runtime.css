@@ -16,6 +16,11 @@
     padding-bottom: calc(100px + env(safe-area-inset-bottom));
   }
 
+  /* A full 08:00-22:00 day should fit like a timetable, not become a metre-long page. */
+  .page-week .week-board {
+    --time-step-height: 2.55px !important;
+  }
+
   /* Boundary guides may address the final grid line; implicit tracks must never add a blank tail. */
   .page-week .week-time-grid {
     grid-auto-rows: 0;
