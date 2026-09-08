@@ -81,6 +81,27 @@ if (runtime.includes('.week-scroll::after')) {
   process.exit(1);
 }
 
+const mobileNavMarkers = [
+  'left: 10px;',
+  'right: 10px;',
+  'bottom: calc(7px + env(safe-area-inset-bottom));',
+  'width: auto;',
+  'height: 66px;',
+  'border-radius: 28px;'
+];
+
+for (const marker of mobileNavMarkers) {
+  if (!runtime.includes(marker)) {
+    console.error(`Mobile navigation regression: missing ${marker}`);
+    process.exit(1);
+  }
+}
+
+if (/\.mobile-nav\s*\{[^}]*width:\s*100%/s.test(runtime)) {
+  console.error('Mobile navigation regression: tab bar must stay compact instead of becoming a full-width bottom sheet.');
+  process.exit(1);
+}
+
 const readableMarkers = [
   '.page-week.week-shell',
   'overflow: visible !important',
