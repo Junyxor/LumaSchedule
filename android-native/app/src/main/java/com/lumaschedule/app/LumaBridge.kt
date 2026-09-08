@@ -19,6 +19,8 @@ import com.lumaschedule.app.widgets.NextCourseWidgetProvider
 import com.lumaschedule.app.widgets.ReminderReceiver
 import org.json.JSONObject
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ExecutorService
 
@@ -83,6 +85,8 @@ class LumaBridge(
                     .put("startupMs", uiReadyMs)
                     .toString()
             }
+
+            "check_update" -> checkUpdate().toString()
 
             "get_schedule_snapshot" -> database.getScheduleSnapshot().toString()
 
@@ -205,6 +209,14 @@ class LumaBridge(
                 )
                 .toString()
 
+            "shiguang_start_smart_import" -> shiguang
+                .startSmartImport(
+                    activity,
+                    args.getString("url"),
+                    args.optString("schoolName")
+                )
+                .toString()
+
             "shiguang_start_custom_import" -> shiguang
                 .startCustomImport(
                     activity,
@@ -302,6 +314,49 @@ class LumaBridge(
 
             else -> error("Native command not implemented yet: $command")
         }
+    }
+
+    private fun checkUpdate(): JSONObject {
+        val current = BuildConfig.VERSION_NAME.substringBefore('-').removePrefix("v")
+        val connection = (URL(LATEST_RELEASE_API).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 8_000
+            readTimeout = 8_000
+            useCaches = false
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("User-Agent", "LumaSchedule/$current")
+            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+        }
+        return try {
+            val code = connection.responseCode
+            if (code !in 200..299) error("检查更新失败（HTTP $code）")
+            val body = connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
+            val release = JSONObject(body)
+            val latest = release.optString("tag_name").removePrefix("v").trim()
+            if (latest.isBlank()) error("GitHub Release 没有有效版本号")
+            JSONObject()
+                .put("currentVersion", current)
+                .put("latestVersion", latest)
+                .put("updateAvailable", compareVersions(latest, current) > 0)
+                .put("releaseUrl", release.optString("html_url"))
+                .put("name", release.optString("name"))
+                .put("publishedAt", release.optString("published_at"))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun compareVersions(left: String, right: String): Int {
+        fun parts(value: String) = value.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+        val a = parts(left)
+        val b = parts(right)
+        val length = maxOf(a.size, b.size, 3)
+        for (index in 0 until length) {
+            val av = a.getOrElse(index) { 0 }
+            val bv = b.getOrElse(index) { 0 }
+            if (av != bv) return av.compareTo(bv)
+        }
+        return 0
     }
 
     private fun validWeekendMode(value: String): Boolean = value in setOf("auto", "weekdays", "sat", "sun", "both")
@@ -430,5 +485,6 @@ class LumaBridge(
     companion object {
         private const val WEB_DAV_PROFILE_KEY = "sync.webdav.profile"
         private const val WEEKEND_MODE_KEY = "schedule.weekend_mode"
+        private const val LATEST_RELEASE_API = "https://api.github.com/repos/Junyxor/LumaSchedule/releases/latest"
     }
 }
