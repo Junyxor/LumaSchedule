@@ -3,7 +3,9 @@ package com.lumaschedule.app.shiguang
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -22,6 +24,9 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
+import com.lumaschedule.app.MainActivity
 import org.json.JSONArray
 import java.io.ByteArrayInputStream
 import java.util.concurrent.CountDownLatch
@@ -38,6 +43,8 @@ class ShiguangImportActivity : Activity() {
     private var manualTrigger: Boolean = false
     private var allowedHosts: Set<String> = emptySet()
     private var insecureTransport: Boolean = false
+    private var backNavigationStarted = false
+    private var backInvokedCallback: OnBackInvokedCallback? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,6 +65,7 @@ class ShiguangImportActivity : Activity() {
 
         title = "$schoolName · $adapterName"
         setContentView(buildUi())
+        registerSystemBack()
         val initialMessage = when {
             captureKind == "grades" -> "请登录教务系统，进入成绩查询/历年成绩页面后点击「抓取成绩」。"
             manualTrigger -> "请登录教务系统，进入个人课表页面并点击查询，再点「尝试抓取课表」。"
@@ -126,16 +134,19 @@ class ShiguangImportActivity : Activity() {
             setPadding(14.dp, 10.dp, 14.dp, 10.dp)
             setBackgroundColor(Color.WHITE)
         }
-        val back = Button(this).apply {
+        val back = TextView(this).apply {
             text = "返回"
-            isAllCaps = false
-            minWidth = 0
-            minimumWidth = 0
-            minHeight = 40.dp
-            minimumHeight = 40.dp
-            setPadding(10.dp, 0, 10.dp, 0)
+            textSize = 16f
+            gravity = Gravity.CENTER
+            minWidth = 64.dp
+            minimumWidth = 64.dp
+            minHeight = 48.dp
+            minimumHeight = 48.dp
+            setPadding(8.dp, 0, 8.dp, 0)
             setTextColor(Color.rgb(81, 75, 194))
-            setBackgroundColor(Color.TRANSPARENT)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "返回 LumaSchedule"
             setOnClickListener { handleBack() }
         }
         val titleView = TextView(this).apply {
@@ -145,7 +156,7 @@ class ShiguangImportActivity : Activity() {
             setPadding(10.dp, 0, 8.dp, 0)
         }
         progress = ProgressBar(this).apply { isIndeterminate = true }
-        bar.addView(back, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        bar.addView(back, LinearLayout.LayoutParams(64.dp, 48.dp))
         bar.addView(titleView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         if (captureKind == "grades" || manualTrigger) {
             val capture = Button(this).apply {
@@ -160,6 +171,16 @@ class ShiguangImportActivity : Activity() {
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         return root
+    }
+
+    private fun registerSystemBack() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val callback = OnBackInvokedCallback { handleBack() }
+        onBackInvokedDispatcher.registerOnBackInvokedCallback(
+            OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+            callback
+        )
+        backInvokedCallback = callback
     }
 
     private fun triggerManualCapture() {
@@ -383,7 +404,8 @@ $adapterScript
     }
 
     private fun handleBack() {
-        if (isFinishing) return
+        if (backNavigationStarted) return
+        backNavigationStarted = true
         if (::sessionId.isInitialized && sessionId.isNotBlank()) {
             val status = currentStatus()
             if (status != "complete" && status != "error") {
@@ -393,15 +415,31 @@ $adapterScript
                     .apply()
             }
         }
-        // This Activity is a modal login surface. Back must return to LumaSchedule,
-        // not walk the WebView history where SSO/login redirects can expose about:blank.
+        if (::webView.isInitialized) webView.stopLoading()
+        setResult(RESULT_CANCELED)
+
+        // Do not rely on finish() revealing the correct previous Activity. A duplicated
+        // login surface or OEM task-stack behavior can leave another WebView on top and
+        // make the button appear dead. Clear every login Activity above MainActivity.
+        val returnIntent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        runCatching { startActivity(returnIntent) }
         finish()
+        @Suppress("DEPRECATION")
+        overridePendingTransition(0, 0)
     }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() = handleBack()
 
     override fun onDestroy() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            backInvokedCallback?.let { callback ->
+                runCatching { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback) }
+            }
+            backInvokedCallback = null
+        }
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface("LumaShiguangBridge")
             webView.stopLoading()
