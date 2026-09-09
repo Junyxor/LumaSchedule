@@ -31,20 +31,32 @@
     margin: 0 !important;
     font-size: 7.8px !important;
     line-height: 1.12 !important;
-    font-weight: 560 !important;
-    color: rgba(38, 37, 45, .74) !important;
+    font-weight: 590 !important;
+    color: rgba(47, 105, 127, .88) !important;
     white-space: normal !important;
     overflow-wrap: anywhere !important;
     word-break: break-word !important;
   }
 
+  /* WeekTimelineCore emits teacher first and room second. When only one of them
+     exists, use a neutral blue-teal so the color never lies about its meaning. */
+  .page-week .week-board:not(.compact) .week-course > span:first-of-type:not(:only-of-type) {
+    color: rgba(73, 78, 166, .92) !important;
+  }
+
+  .page-week .week-board:not(.compact) .week-course > span + span {
+    color: rgba(34, 119, 104, .92) !important;
+  }
+
   .page-week .week-board:not(.compact) .week-course .course-credit {
     display: block !important;
+    align-self: flex-start !important;
     margin-top: 1px !important;
+    padding: 0 !important;
     font-size: 7.6px !important;
     line-height: 1.1 !important;
-    font-weight: 680 !important;
-    color: rgba(38, 37, 45, .68) !important;
+    font-weight: 720 !important;
+    color: rgba(164, 99, 29, .94) !important;
     white-space: normal !important;
   }
 
