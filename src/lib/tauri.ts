@@ -36,6 +36,52 @@ import {
 
 export { importText };
 
+export interface RecentAcademicSource {
+  url: string;
+  schoolName: string;
+  adapterName?: string;
+  updatedAt: number;
+}
+
+const RECENT_ACADEMIC_SOURCE_KEY = 'luma.recentAcademicSource';
+const shiguangAdapterCache = new Map<string, ShiguangAdapter[]>();
+
+function rememberAcademicSource(url: string, schoolName = '', adapterName = '') {
+  if (typeof localStorage === 'undefined') return;
+  const normalizedUrl = url.trim();
+  if (!/^https?:\/\//i.test(normalizedUrl)) return;
+  const source: RecentAcademicSource = {
+    url: normalizedUrl,
+    schoolName: schoolName.trim(),
+    adapterName: adapterName.trim() || undefined,
+    updatedAt: Date.now()
+  };
+  try {
+    localStorage.setItem(RECENT_ACADEMIC_SOURCE_KEY, JSON.stringify(source));
+  } catch {
+    // The native flow still works if WebView storage is unavailable.
+  }
+}
+
+export function getRecentAcademicSource(): RecentAcademicSource | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(RECENT_ACADEMIC_SOURCE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<RecentAcademicSource>;
+    const url = typeof parsed.url === 'string' ? parsed.url.trim() : '';
+    if (!/^https?:\/\//i.test(url)) return null;
+    return {
+      url,
+      schoolName: typeof parsed.schoolName === 'string' ? parsed.schoolName.trim() : '',
+      adapterName: typeof parsed.adapterName === 'string' && parsed.adapterName.trim() ? parsed.adapterName.trim() : undefined,
+      updatedAt: typeof parsed.updatedAt === 'number' && Number.isFinite(parsed.updatedAt) ? parsed.updatedAt : 0
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function getBootstrap() {
   return invokeNative<{
     appVersion: string;
@@ -154,37 +200,53 @@ export function listShiguangSchools(query = '') {
   });
 }
 
-export function listShiguangAdapters(schoolId: string) {
-  return invokeNative<ShiguangAdapter[]>('shiguang_list_adapters', { schoolId });
+export async function listShiguangAdapters(schoolId: string) {
+  const adapters = await invokeNative<ShiguangAdapter[]>('shiguang_list_adapters', { schoolId });
+  shiguangAdapterCache.set(schoolId, adapters);
+  return adapters;
 }
 
-export function startShiguangImport(schoolId: string, adapterId: string) {
-  return invokeNative<ShiguangImportStart>('shiguang_start_import', {
+export async function startShiguangImport(schoolId: string, adapterId: string) {
+  const started = await invokeNative<ShiguangImportStart>('shiguang_start_import', {
     schoolId,
     adapterId
   });
+  const adapter = shiguangAdapterCache.get(schoolId)?.find((item) => item.adapterId === adapterId);
+  if (adapter?.importUrl) {
+    rememberAcademicSource(adapter.importUrl, adapter.schoolName || started.schoolName, adapter.adapterName);
+  }
+  return started;
 }
 
-export function startSmartCompatibilityImport(url: string, schoolName = '') {
-  return invokeNative<ShiguangImportStart>('shiguang_start_smart_import', {
-    url: url.trim(),
+export async function startSmartCompatibilityImport(url: string, schoolName = '') {
+  const normalizedUrl = url.trim();
+  const started = await invokeNative<ShiguangImportStart>('shiguang_start_smart_import', {
+    url: normalizedUrl,
     schoolName: schoolName.trim()
   });
+  rememberAcademicSource(normalizedUrl, started.schoolName || schoolName, started.adapterName);
+  return started;
 }
 
-export function startCompatibilityImport(url: string, family: CompatibilityFamily, schoolName = '') {
-  return invokeNative<ShiguangImportStart>('shiguang_start_custom_import', {
-    url: url.trim(),
+export async function startCompatibilityImport(url: string, family: CompatibilityFamily, schoolName = '') {
+  const normalizedUrl = url.trim();
+  const started = await invokeNative<ShiguangImportStart>('shiguang_start_custom_import', {
+    url: normalizedUrl,
     family,
     schoolName: schoolName.trim()
   });
+  rememberAcademicSource(normalizedUrl, started.schoolName || schoolName, started.adapterName);
+  return started;
 }
 
-export function startGradeCapture(url: string, institution = '') {
-  return invokeNative<ShiguangImportStart>('shiguang_start_grade_capture', {
-    url: url.trim(),
+export async function startGradeCapture(url: string, institution = '') {
+  const normalizedUrl = url.trim();
+  const started = await invokeNative<ShiguangImportStart>('shiguang_start_grade_capture', {
+    url: normalizedUrl,
     institution: institution.trim()
   });
+  rememberAcademicSource(normalizedUrl, started.schoolName || institution, started.adapterName);
+  return started;
 }
 
 export function getShiguangSession(sessionId: string) {
