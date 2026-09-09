@@ -1,8 +1,9 @@
 {
-  "version": "0.1.4",
-  "target": "caf23af2cc97528bb74f45a2417678f4ea297306",
-  "title": "LumaSchedule v0.1.4｜把教务返回这件事彻底兜住",
-  "tagMessage": "LumaSchedule v0.1.4 正式版\n\n这版继续修教务登录页返回问题：不再只依赖 finish()，而是显式回到 MainActivity，同时兼容 Android 13+ 系统返回回调，并扩大顶部返回按钮点击区域。",
-  "notes": "# LumaSchedule v0.1.4\n\n这版主要就干一件事：把教务登录页的返回再修一遍，而且这次不再赌系统自己处理 Activity 栈。\n\n## 这次具体改了什么\n\n- 顶部「返回」扩大了点击区域，避免看得到但不好点。\n- Android 13 及以上接入系统返回回调，侧滑返回和系统返回键走同一套逻辑。\n- 返回时先停止教务 WebView，再结束当前导入会话。\n- 不再只调用 `finish()`，而是显式回到 LumaSchedule 的 `MainActivity`，并用 `CLEAR_TOP + SINGLE_TOP` 清掉上面的教务登录页，尽量避开部分系统/ROM 下 Activity 栈行为不一致的问题。\n- 退出登录页时仍会正确结束当前导入状态，不会让主界面一直卡在“正在登录”。\n\n前一版看起来逻辑上已经修了，但实际设备上点返回仍然没反应，所以这次直接把兜底做到了 Activity 栈这一层。\n\n## 版本\n\n- Web：`0.1.4`\n- Android：`0.1.4`\n- versionCode：`1004`\n\nRelease 会附带 APK、AAB、SHA256 校验文件和签名证书信息。已安装旧版的可以直接覆盖升级。",
-  "metadataOnly": false
+  "version": "0.1.5-beta.1",
+  "target": "54751d176753a8cde5edf63281c718a7313f6791",
+  "title": "LumaSchedule v0.1.5-beta.1｜成绩页复用教务登录测试版",
+  "tagMessage": "LumaSchedule v0.1.5-beta.1 预发布测试版\n\n尝试复用最近一次课表导入时使用的学校、教务入口和 WebView 登录状态，让成绩页不再重复要求用户重新找链接、重新登录。",
+  "notes": "# LumaSchedule v0.1.5-beta.1\n\n这是一个预发布测试版，主要拿来验证一件事：课表那里已经登录过教务以后，成绩页能不能直接接着用。\n\n这次把最近使用过的学校、适配器和教务入口记下来了。进入成绩页后，如果之前从课表导入里打开过学校教务，会优先给出一个直接读取成绩的入口。Android 这边仍然使用同一套 WebView CookieManager，所以 Cookie 还有效的话，理论上不会再让你重新输入账号密码。\n\n原来的手动填写学校和教务网址没有删，只是退到“其他学校 / 手动设置”里当兜底。Cookie 过期、学校用了额外的 sessionStorage / SSO 状态，或者换了教务系统时，仍然可能需要重新认证。\n\n这个版本先不要当正式稳定版，主要看真机上登录态到底能不能稳定复用。\n\n## 版本\n\n- Web：`0.1.5-beta.1`\n- Android：`0.1.5-beta.1`\n- versionCode：`100501`\n\n如果测试结果正常，再把这套流程收进后续正式版。",
+  "metadataOnly": false,
+  "prerelease": true
 }
