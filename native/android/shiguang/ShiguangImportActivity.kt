@@ -129,6 +129,13 @@ class ShiguangImportActivity : Activity() {
         val back = Button(this).apply {
             text = "返回"
             isAllCaps = false
+            minWidth = 0
+            minimumWidth = 0
+            minHeight = 40.dp
+            minimumHeight = 40.dp
+            setPadding(10.dp, 0, 10.dp, 0)
+            setTextColor(Color.rgb(81, 75, 194))
+            setBackgroundColor(Color.TRANSPARENT)
             setOnClickListener { handleBack() }
         }
         val titleView = TextView(this).apply {
@@ -376,7 +383,19 @@ $adapterScript
     }
 
     private fun handleBack() {
-        if (::webView.isInitialized && webView.canGoBack()) webView.goBack() else finish()
+        if (isFinishing) return
+        if (::sessionId.isInitialized && sessionId.isNotBlank()) {
+            val status = currentStatus()
+            if (status != "complete" && status != "error") {
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putString(key(sessionId, "status"), "error")
+                    .putString(key(sessionId, "message"), "已退出教务登录；本次没有导入数据。")
+                    .apply()
+            }
+        }
+        // This Activity is a modal login surface. Back must return to LumaSchedule,
+        // not walk the WebView history where SSO/login redirects can expose about:blank.
+        finish()
     }
 
     @Deprecated("Deprecated in Java")
