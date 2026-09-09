@@ -13,7 +13,7 @@ on:
         type: boolean
         default: false
       version:
-        description: 'Version for a manual signed build, e.g. 0.1.1'
+        description: 'Version for a manual signed build, e.g. 0.1.1 or 0.1.2-beta.1'
         required: false
         type: string
         default: '0.1.1'
@@ -122,14 +122,24 @@ jobs:
           set -euo pipefail
           if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
             TAG="$GITHUB_REF_NAME"
-            [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Release tag must look like v0.1.0"; exit 1; }
+            [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::Release tag must look like v0.1.0 or v0.1.1-beta.1"; exit 1; }
             VERSION="${TAG#v}"
           else
             VERSION="${{ github.event.inputs.version }}"
-            [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Manual release version must look like 0.1.0"; exit 1; }
+            [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::Manual release version must look like 0.1.0 or 0.1.1-beta.1"; exit 1; }
           fi
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-          CODE=$((10#$MAJOR * 1000000 + 10#$MINOR * 1000 + 10#$PATCH))
+          CORE_VERSION="${VERSION%%-*}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CORE_VERSION"
+          BASE_CODE=$((10#$MAJOR * 100000000 + 10#$MINOR * 100000 + 10#$PATCH * 100))
+          if [[ "$VERSION" == *-* ]]; then
+            PRE_INDEX="$(printf '%s' "$VERSION" | grep -oE '[0-9]+$' || true)"
+            [[ -n "$PRE_INDEX" ]] || PRE_INDEX=1
+            PRE_INDEX=$((10#$PRE_INDEX))
+            (( PRE_INDEX >= 1 && PRE_INDEX <= 98 )) || { echo "::error::Prerelease index must be between 1 and 98"; exit 1; }
+            CODE=$((BASE_CODE + PRE_INDEX))
+          else
+            CODE=$((BASE_CODE + 99))
+          fi
           test "$CODE" -gt 0 || CODE=1
           echo "LUMA_VERSION_NAME=$VERSION" >> "$GITHUB_ENV"
           echo "LUMA_VERSION_CODE=$CODE" >> "$GITHUB_ENV"
