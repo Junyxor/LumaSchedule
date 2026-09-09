@@ -1,7 +1,8 @@
 <script lang="ts">
   import { BarChart3, BookOpenCheck, CheckCircle2, ExternalLink, GraduationCap, LoaderCircle, RefreshCw, Search, ShieldCheck, TrendingUp, X } from 'lucide-svelte';
   import { onDestroy, onMount } from 'svelte';
-  import { closeShiguangSession, commitGradeBundle, getGradeSnapshot, getShiguangSession, startGradeCapture } from '../tauri';
+  import { closeShiguangSession, commitGradeBundle, getGradeSnapshot, getRecentAcademicSource, getShiguangSession, startGradeCapture } from '../tauri';
+  import type { RecentAcademicSource } from '../tauri';
   import type { GradeImportBundle, GradeRecord, GradeSnapshot, ShiguangImportStart } from '../types';
 
   let snapshot: GradeSnapshot = { records: [], terms: [], institutions: [] };
@@ -13,6 +14,7 @@
   let includeElective = true;
   let institution = '';
   let academicUrl = '';
+  let recentSource: RecentAcademicSource | null = null;
   let activeSession: ShiguangImportStart | null = null;
   let captureMessage = '';
   let gradePreview: GradeImportBundle | null = null;
@@ -117,17 +119,26 @@
     };
   }
 
-  async function beginCapture() {
-    if (!academicUrl.trim() || activeSession) {
-      if (!academicUrl.trim()) error = '请先粘贴学校官方教务系统地址。';
+  async function beginCapture(source = recentSource) {
+    if (activeSession) return;
+    const url = source?.url?.trim() || academicUrl.trim();
+    const school = source?.schoolName?.trim() || institution.trim();
+    if (!url) {
+      error = '还没有可复用的教务入口，请先在“添加课表”里登录一次，或展开手动设置填写教务地址。';
       return;
+    }
+    if (source) {
+      academicUrl = url;
+      if (school) institution = school;
     }
     error = '';
     status = '';
     gradePreview = null;
     try {
-      activeSession = await startGradeCapture(academicUrl, institution);
-      captureMessage = '登录窗口已打开。进入成绩查询页面后，点击顶部「抓取成绩」。';
+      activeSession = await startGradeCapture(url, school);
+      captureMessage = source
+        ? '正在复用最近的教务登录状态。若 Cookie 仍有效，会直接保持登录；进入成绩查询页后点顶部「抓取成绩」。'
+        : '教务窗口已打开。进入成绩查询页面后，点击顶部「抓取成绩」。';
       pollCapture(activeSession.sessionId);
     } catch (e) {
       error = friendlyError(e);
@@ -174,7 +185,14 @@
     }
   }
 
-  onMount(() => void refresh());
+  onMount(() => {
+    recentSource = getRecentAcademicSource();
+    if (recentSource) {
+      academicUrl = recentSource.url;
+      if (!institution && recentSource.schoolName) institution = recentSource.schoolName;
+    }
+    void refresh();
+  });
   onDestroy(() => { if (pollTimer) clearTimeout(pollTimer); });
 
   $: normalizedQuery = query.trim().toLowerCase();
@@ -252,16 +270,28 @@
   </article>
 
   <article class="grade-capture glass-panel refract">
-    <div class="grade-card-head"><div><span class="eyebrow">教务抓取 · 兼容模式</span><h2>从学校官方教务读取成绩</h2><p>学校未专门适配时，可粘贴官方教务地址，在隔离 WebView 登录后抓取标准成绩表。</p></div><ShieldCheck size={20}/></div>
-    <div class="capture-form">
-      <label><span>学校名称</span><input bind:value={institution} placeholder="例如 广东工业大学" /></label>
-      <label class="wide"><span>官方教务地址</span><input bind:value={academicUrl} inputmode="url" placeholder="https://jxfw.example.edu.cn/" /></label>
-    </div>
-    <div class="capture-actions">
-      <a href={bingUrl}><ExternalLink size={15}/> Bing 搜索教务官网</a>
-      <button class="primary-button" on:click={beginCapture} disabled={!!activeSession}>{activeSession ? '等待教务页面…' : '打开登录并抓取成绩'}</button>
-    </div>
-    <small class="capture-security">搜索仅用于寻找官网；请确认域名属于学校后再粘贴。Luma 不会自动把搜索结果当成登录页，也不会把账号密码传回主页面。</small>
+    <div class="grade-card-head"><div><span class="eyebrow">教务成绩</span><h2>{recentSource?.schoolName ? `从${recentSource.schoolName}读取成绩` : '从学校官方教务读取成绩'}</h2><p>{recentSource ? '已记住最近使用的教务入口，会直接复用 WebView Cookie；登录状态失效时才需要重新认证。' : '先在“添加课表”里登录一次教务，之后这里会自动记住学校和入口。'}</p></div><ShieldCheck size={20}/></div>
+
+    {#if recentSource}
+      <div class="recent-source">
+        <div><b>{recentSource.schoolName || '最近使用的教务系统'}</b><span>{recentSource.adapterName || '已保存教务入口'}</span><small>{recentSource.url}</small></div>
+        <button class="primary-button" on:click={() => beginCapture(recentSource)} disabled={!!activeSession}>{activeSession ? '等待教务页面…' : '直接读取成绩'}</button>
+      </div>
+      <small class="capture-security">这里不会保存账号或密码。登录态仍由 Android WebView 的 Cookie 管理；如果学校的会话还没过期，打开后应该直接保持登录。</small>
+    {/if}
+
+    <details class="capture-manual" open={!recentSource}>
+      <summary>{recentSource ? '其他学校 / 手动设置' : '手动填写教务入口'}</summary>
+      <div class="capture-form">
+        <label><span>学校名称</span><input bind:value={institution} placeholder="例如 广东工业大学" /></label>
+        <label class="wide"><span>官方教务地址</span><input bind:value={academicUrl} inputmode="url" placeholder="https://jxfw.example.edu.cn/" /></label>
+      </div>
+      <div class="capture-actions">
+        <a href={bingUrl}><ExternalLink size={15}/> Bing 搜索教务官网</a>
+        <button class="primary-button" on:click={() => beginCapture(null)} disabled={!!activeSession}>{activeSession ? '等待教务页面…' : '打开教务并抓取成绩'}</button>
+      </div>
+      <small class="capture-security">只有换学校、最近入口不可用，或者还没从课表页登录过教务时，才需要用这里。</small>
+    </details>
     {#if activeSession}<div class="capture-session"><LoaderCircle class="spin" size={17}/><span>{captureMessage}</span></div>{/if}
   </article>
 
@@ -327,6 +357,14 @@
   .grade-row > span { font-size: 16px; font-weight: 700; }
   .grade-row > em { min-width: 64px; text-align: right; font-style: normal; font-size: 10px; color: rgba(60,60,67,.58); }
   .grade-capture { margin-top: 14px; padding: 18px; }
+  .recent-source { margin-top: 16px; display: flex; gap: 14px; align-items: center; padding: 14px; border: 1px solid rgba(91,86,214,.12); border-radius: 16px; background: rgba(91,86,214,.06); }
+  .recent-source > div { flex: 1; min-width: 0; }
+  .recent-source b, .recent-source span, .recent-source small { display: block; }
+  .recent-source b { font-size: 13px; }
+  .recent-source span { margin-top: 3px; font-size: 10px; color: rgba(60,60,67,.58); }
+  .recent-source small { margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; color: rgba(60,60,67,.44); }
+  .capture-manual { margin-top: 12px; }
+  .capture-manual summary { cursor: pointer; list-style-position: inside; font-size: 11px; color: rgba(60,60,67,.62); }
   .capture-form { display: grid; grid-template-columns: .8fr 1.2fr; gap: 10px; margin-top: 16px; }
   .capture-form .wide { min-width: 0; }
   .capture-actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 12px; }
@@ -351,6 +389,8 @@
     .grade-filters { grid-template-columns: 1fr 1fr; }
     .grade-filters > button { grid-column: 1 / -1; }
     .grade-dashboard, .grade-summary-grid { grid-template-columns: 1fr; }
+    .recent-source { align-items: stretch; flex-direction: column; }
+    .recent-source .primary-button { width: 100%; }
     .capture-form { grid-template-columns: 1fr; }
     .capture-actions { align-items: stretch; flex-direction: column; }
     .capture-actions a, .capture-actions button { justify-content: center; width: 100%; }
