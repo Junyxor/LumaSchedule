@@ -217,7 +217,8 @@ async function runScenario({
   sandbox.window.shiguangBridge = {
     showToast(message) { captured.toasts.push(String(message)); },
     notifyTaskCompletion() { captured.completed = true; },
-    reportError(message) { captured.errors.push(String(message)); }
+    reportError(message) { captured.errors.push(String(message)); },
+    updateProgress(message) { captured.toasts.push('[progress] ' + String(message)); }
   };
   sandbox.window.shiguangBridgePromise = {
     async showAlert(title, message, confirmText) {

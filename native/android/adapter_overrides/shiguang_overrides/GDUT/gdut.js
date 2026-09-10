@@ -52,6 +52,15 @@ function toastOnly(message) {
     try { window.shiguangBridge.showToast(String(message || '')); } catch (e) { }
 }
 
+function reportProgress(message) {
+    const text = String(message || '');
+    try {
+        if (window.shiguangBridge && typeof window.shiguangBridge.updateProgress === 'function') {
+            window.shiguangBridge.updateProgress(text);
+        }
+    } catch (e) { }
+}
+
 function fail(message) {
     var text = String(message || '导入失败');
     toastOnly(text);
@@ -508,10 +517,15 @@ async function fetchCoursesByWeek(semesterId) {
     // 16 GETs for ONE semester only — never scan other terms.
     const maxWeek = 16;
     const delayMs = 120;
-    toastOnly(`正在按周读取 ${semesterId} 课表（约 ${maxWeek} 次请求）…`);
+    reportProgress(`正在读取 ${semesterId} 第 1/${maxWeek} 周…`);
+    toastOnly(`开始按周读取课表（第 1/${maxWeek} 周）`);
     let loginSeen = false;
     const all = [];
     for (let week = 1; week <= maxWeek; week += 1) {
+        reportProgress(`正在读取 ${semesterId} 第 ${week}/${maxWeek} 周…`);
+        if (week === 1 || week === maxWeek || week % 4 === 0) {
+            toastOnly(`读取课表：第 ${week}/${maxWeek} 周`);
+        }
         const url = `${url_strings.GET_WEEK_COURSES_API_URL}?xnxqdm=${encodeURIComponent(semesterId)}&zc=${week}`;
         try {
             const text = await fetchText(url, {
@@ -530,6 +544,7 @@ async function fetchCoursesByWeek(semesterId) {
             if (rows.length) {
                 console.log(`第 ${week} 周读到 ${rows.length} 条`);
                 all.push.apply(all, rows);
+                reportProgress(`已读第 ${week}/${maxWeek} 周，累计 ${all.length} 条…`);
             }
         } catch (error) {
             console.warn(`第 ${week} 周课表失败`, error);
@@ -538,6 +553,7 @@ async function fetchCoursesByWeek(semesterId) {
     }
     if (loginSeen) return { loginPage: true };
     if (!all.length) return { empty: true, preview: `no-kbrq-rows weeks=1..${maxWeek}` };
+    reportProgress(`周课表读取完成：${all.length} 条，正在整理…`);
     return { courses: all };
 }
 

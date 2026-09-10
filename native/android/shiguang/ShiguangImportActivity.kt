@@ -252,7 +252,8 @@ class ShiguangImportActivity : Activity() {
   window.shiguangBridge = {
     showToast(message) { nativeBridge.showToast(String(message)); },
     notifyTaskCompletion() { nativeBridge.notifyTaskCompletion(); },
-    reportError(message) { nativeBridge.reportError(String(message)); }
+    reportError(message) { nativeBridge.reportError(String(message)); },
+    updateProgress(message) { nativeBridge.updateProgress(String(message)); }
   };
   window.shiguangBridgePromise = {
     async showAlert(title, message, confirmText) {
@@ -311,6 +312,12 @@ $adapterScript
         @JavascriptInterface
         fun showToast(message: String) {
             runOnUiThread { Toast.makeText(this@ShiguangImportActivity, message, Toast.LENGTH_SHORT).show() }
+        }
+
+        @JavascriptInterface
+        fun updateProgress(message: String) {
+            if (currentStatus() == "complete") return
+            save("message", message.take(200))
         }
 
         @JavascriptInterface
