@@ -37,3 +37,5 @@ keystore.properties
 # Adapter sync worktrees/cache
 .upstream/
 .cache/
+
+dist-apk/

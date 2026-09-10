@@ -297,8 +297,8 @@ if (happy.slots[0]?.startTime !== '08:30' || happy.slots[13]?.endTime !== '22:35
 if (happy.config?.semesterStartDate !== '2026-09-07') {
   throw new Error(`happy-path: semester start parsing regressed: ${happy.config?.semesterStartDate}`);
 }
-if (happy.config?.semesterTotalWeeks !== 20 || happy.config?.firstDayOfWeek !== 1) {
-  throw new Error('happy-path: course config contract changed unexpectedly');
+if (happy.config?.semesterTotalWeeks !== 18 || happy.config?.firstDayOfWeek !== 1) {
+  throw new Error(`happy-path: course config contract changed unexpectedly ${JSON.stringify(happy.config)}`);
 }
 if (happy.alerts.length !== 1 || happy.selections.length !== 1) {
   throw new Error('happy-path: confirmation/semester selection flow changed unexpectedly');

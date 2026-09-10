@@ -512,20 +512,16 @@ function parseKbRqCourses(kbRes) {
 }
 
 async function fetchCoursesByWeek(semesterId) {
-    // The official 周课表 page only loads courses when a specific week (zc) is set.
-    // getDataList stays empty for many students, so walk weeks 1..16 via getKbRq.
-    // 16 GETs for ONE semester only — never scan other terms.
-    const maxWeek = 16;
-    const delayMs = 120;
+    // Official 周课表 only loads a week when zc is set. getDataList is empty for many
+    // students, so walk weeks 1..18 via getKbRq for this ONE semester only.
+    const maxWeek = 18;
+    const delayMs = 100;
     reportProgress(`正在读取 ${semesterId} 第 1/${maxWeek} 周…`);
-    toastOnly(`开始按周读取课表（第 1/${maxWeek} 周）`);
     let loginSeen = false;
     const all = [];
+    let startDate = null;
     for (let week = 1; week <= maxWeek; week += 1) {
         reportProgress(`正在读取 ${semesterId} 第 ${week}/${maxWeek} 周…`);
-        if (week === 1 || week === maxWeek || week % 4 === 0) {
-            toastOnly(`读取课表：第 ${week}/${maxWeek} 周`);
-        }
         const url = `${url_strings.GET_WEEK_COURSES_API_URL}?xnxqdm=${encodeURIComponent(semesterId)}&zc=${week}`;
         try {
             const text = await fetchText(url, {
@@ -539,12 +535,20 @@ async function fetchCoursesByWeek(semesterId) {
             }
             let payload = null;
             try { payload = JSON.parse(text); } catch (e) { continue; }
-            if (!Array.isArray(payload) || !Array.isArray(payload[0])) continue;
+            if (!Array.isArray(payload)) continue;
+            if (week === 1 && !startDate) {
+                const dayStr = extractFirstDay(JSON.stringify(payload));
+                if (dayStr) {
+                    const d = new Date(dayStr);
+                    if (!isNaN(d.getTime())) startDate = d;
+                }
+            }
+            if (!Array.isArray(payload[0])) continue;
             const rows = parseKbRqCourses(payload[0]);
             if (rows.length) {
                 console.log(`第 ${week} 周读到 ${rows.length} 条`);
                 all.push.apply(all, rows);
-                reportProgress(`已读第 ${week}/${maxWeek} 周，累计 ${all.length} 条…`);
+                reportProgress(`已读 ${week}/${maxWeek} 周，累计 ${all.length} 条…`);
             }
         } catch (error) {
             console.warn(`第 ${week} 周课表失败`, error);
@@ -553,27 +557,21 @@ async function fetchCoursesByWeek(semesterId) {
     }
     if (loginSeen) return { loginPage: true };
     if (!all.length) return { empty: true, preview: `no-kbrq-rows weeks=1..${maxWeek}` };
-    reportProgress(`周课表读取完成：${all.length} 条，正在整理…`);
-    return { courses: all };
+    reportProgress(`周课表读取完成：${all.length} 条，正在写入预览…`);
+    return { courses: all, startDate: startDate || new Date() };
 }
 
 async function fetchCourses(semesterId) {
     try {
         console.log(`正在获取学期 ${semesterId} 的课程数据（周课表 getKbRq）...`);
-
         const fromWeeks = await fetchCoursesByWeek(semesterId);
-        if (fromWeeks && fromWeeks.courses && fromWeeks.courses.length) return fromWeeks.courses;
-        if (fromWeeks && fromWeeks.loginPage) {
-            throw new Error('教务会话无效（课表接口返回登录页）。请重新登录后点「读取课表」。');
+        if (fromWeeks && fromWeeks.courses && fromWeeks.courses.length) {
+            return { courses: fromWeeks.courses, startDate: fromWeeks.startDate || new Date() };
         }
-
-        // Last resort: one HTML page + one getDataList (legacy path).
-        const fromHtml = await fetchCoursesFromHtml(semesterId);
-        if (fromHtml && fromHtml.courses && fromHtml.courses.length) return fromHtml.courses;
-        const fromJson = await fetchCoursesFromJsonOnce(semesterId);
-        if (fromJson && fromJson.courses && fromJson.courses.length) return fromJson.courses;
-
-        const preview = (fromWeeks && fromWeeks.preview) || (fromJson && fromJson.preview) || (fromHtml && fromHtml.preview) || '';
+        if (fromWeeks && fromWeeks.loginPage) {
+            throw new Error('教务会话无效（课表接口返回登录页）。请重新登录后点底部「读取课表」。');
+        }
+        const preview = (fromWeeks && fromWeeks.preview) || '';
         throw new Error(`学期 ${semesterId} 未读到课程（摘要：${preview || 'empty'}）。请确认网页「周课表」在选中某一周时有课。`);
     } catch (error) {
         console.error('添加课程表失败:', error);
@@ -753,22 +751,24 @@ async function runImportFlow() {
             return;
         }
 
-        toastOnly(`正在读取 ${selected.label} 课表…`);
-        const startDate = await fetchStartDate(selected.value);
-        const courses = await fetchCourses(selected.value);
-        if (!courses || !courses.length) {
+        reportProgress(`准备读取 ${selected.label}…`);
+        const resultBundle = await fetchCourses(selected.value);
+        if (!resultBundle || !resultBundle.courses || !resultBundle.courses.length) {
             console.log(`未能获取课程数据，停止后续执行。`);
             return;
         }
+        const courses = resultBundle.courses;
+        const startDate = resultBundle.startDate || new Date();
 
         const config = {
             semesterStartDate: startDate.toISOString().split('T')[0],
-            semesterTotalWeeks: 20,
+            semesterTotalWeeks: 18,
             defaultClassDuration: 45,
             defaultBreakDuration: 5,
             firstDayOfWeek: 1
         };
 
+        reportProgress(`正在写入 ${courses.length} 条课程…`);
         await saveConfig(config);
         await saveCourses(courses);
         await setPresetTimeSlots();
