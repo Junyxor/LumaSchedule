@@ -165,18 +165,23 @@ class ShiguangImportActivity : Activity() {
         progress = ProgressBar(this).apply { isIndeterminate = true }
         bar.addView(back, LinearLayout.LayoutParams(64.dp, 48.dp))
         bar.addView(titleView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        // Always expose a manual capture control. Official adapters still auto-inject after login,
-        // but SSO redirects / SPA shells can miss onPageFinished; the button is the recovery path.
-        val capture = Button(this).apply {
-            text = if (captureKind == "grades") "读取成绩" else "读取课表"
-            isAllCaps = false
-            setOnClickListener { triggerManualCapture() }
-        }
-        bar.addView(capture, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         bar.addView(progress, LinearLayout.LayoutParams(24.dp, 24.dp))
         webView = WebView(this)
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         root.addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        // Full-width bottom action: easy to hit after SSO, independent of top-bar layout.
+        val capture = Button(this).apply {
+            text = if (captureKind == "grades") "读取成绩" else "读取课表"
+            isAllCaps = false
+            textSize = 16f
+            minHeight = 52.dp
+            setPadding(16.dp, 12.dp, 16.dp, 12.dp)
+            setOnClickListener { triggerManualCapture() }
+        }
+        root.addView(
+            capture,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        )
         return root
     }
 

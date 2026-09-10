@@ -296,14 +296,14 @@ if (htmlLogin.completed) {
   throw new Error('html-login-page: adapter must not complete when the session probe still returns a login page');
 }
 
-// Empty JSON should fall through to a clearer semester-specific error (reportError).
+// Empty JSON/HTML should surface a clear error with a response preview (reportError).
 const emptyCourses = await runScenario({
   label: 'empty-json',
   coursePayload: { total: 0, rows: [] },
   allKbBody: '<html>本学期课表还未开放，请稍后查询！</html>',
   expectError: true
 });
-if (!emptyCourses.errors.some((e) => e.includes('未开放') || e.includes('没有返回课程') || e.includes('没有找到课程'))) {
+if (!emptyCourses.errors.some((e) => e.includes('未读到课程') || e.includes('未开放') || e.includes('没有返回课程'))) {
   throw new Error(`empty-json: unexpected errors ${JSON.stringify(emptyCourses.errors)}`);
 }
 

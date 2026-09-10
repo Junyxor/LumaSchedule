@@ -244,31 +244,74 @@ function extractFirstDay(dateInfoJsonData) {
 }
 
 async function fetchStartDate(semesterId) {
-    const candidates = [
-        `${url_strings.GET_WEEK_COURSES_API_URL}?xnxqdm=${encodeURIComponent(semesterId)}&zc=1`,
-        `${url_strings.GET_WEEK_COURSES_API_URL}?xnxqdm=${encodeURIComponent(semesterId)}`
-    ];
-    for (const url of candidates) {
-        try {
-            console.log(`正在获取学期开始日期。学期代码：${semesterId}`);
-            const data = await fetchText(url, {
-                method: 'GET',
-                headers: { 'Referer': url },
-                credentials: 'include'
-            });
-            if (looksLikeLoginHtml(data)) continue;
-            const startDateString = extractFirstDay(data);
-            if (!startDateString) continue;
-            const date = new Date(startDateString);
-            if (!isNaN(date.getTime())) {
-                console.log(`成功获取学期开始日期: ${date.toISOString().split('T')[0]}`);
-                return date;
-            }
-        } catch (error) {
-            console.warn('获取学期开始日期失败', error);
+    // Single request only — do not fan out across endpoints.
+    const url = `${url_strings.GET_WEEK_COURSES_API_URL}?xnxqdm=${encodeURIComponent(semesterId)}&zc=1`;
+    try {
+        console.log(`正在获取学期开始日期。学期代码：${semesterId}`);
+        const data = await fetchText(url, {
+            method: 'GET',
+            headers: { 'Referer': url },
+            credentials: 'include'
+        });
+        if (looksLikeLoginHtml(data)) return new Date();
+        const startDateString = extractFirstDay(data);
+        if (!startDateString) return new Date();
+        const date = new Date(startDateString);
+        if (!isNaN(date.getTime())) {
+            console.log(`成功获取学期开始日期: ${date.toISOString().split('T')[0]}`);
+            return date;
         }
+    } catch (error) {
+        console.warn('获取学期开始日期失败', error);
     }
     return new Date();
+}
+
+function parseCourseLikeObject(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const jcdm = String(raw.jcdm || raw.jcdm2 || raw.jc || '');
+    const sectionMatch = jcdm.match(/\d{2}/g);
+    if (!sectionMatch) return null;
+    const sections = sectionMatch.map(Number);
+    const day = Number(raw.xq || raw.xqdm || raw.day || 0);
+    if (!(day >= 1 && day <= 7)) return null;
+    const name = decodeHtmlEntities(raw.kcmc || raw.kcm || raw.name || '').trim();
+    if (!name) return null;
+    const week = Number(raw.zc || raw.skzc || 0);
+    return {
+        name: name,
+        teacher: decodeHtmlEntities(raw.teaxms || raw.jsm || raw.teacher || '').trim(),
+        position: decodeHtmlEntities(raw.jxcdmc || raw.jxdd || raw.position || '').trim(),
+        day: day,
+        startSection: sections[0],
+        endSection: sections[sections.length - 1],
+        weeks: isNaN(week) ? [] : [week],
+        isCustomTime: false
+    };
+}
+
+function extractEmbeddedCourseArrays(htmlText) {
+    // Many Struts jw pages embed the grid as `var kbxx = [...]` / `kbList = [...]`.
+    const html = String(htmlText || '');
+    if (looksLikeLoginHtml(html) || html.length < 80) return [];
+    const keys = ['kbxx', 'kbList', 'skkbList', 'courseList', 'rows', 'list', 'data'];
+    const found = [];
+    for (const key of keys) {
+        const re = new RegExp('(?:var\\s+)?' + key + '\\s*=\\s*(\\[[\\s\\S]*?\\])\\s*;', 'i');
+        const match = html.match(re);
+        if (!match) continue;
+        try {
+            const arr = JSON.parse(match[1]);
+            if (Array.isArray(arr) && arr.length) found.push({ key: key, rows: arr });
+        } catch (e) {
+            // try single-quoted JSON-ish
+            try {
+                const arr = JSON.parse(match[1].replace(/'/g, '"'));
+                if (Array.isArray(arr) && arr.length) found.push({ key: key, rows: arr });
+            } catch (e2) { /* ignore */ }
+        }
+    }
+    return found;
 }
 
 async function postCourseJson(body) {
@@ -295,60 +338,27 @@ async function postCourseJson(body) {
     }
 }
 
-async function fetchCoursesFromJson(semesterId) {
-    const pageSize = 1000;
-    const variants = [];
-
-    const full = new URLSearchParams();
-    full.append('zc', '');
-    full.append('xnxqdm', semesterId);
-    full.append('page', '1');
-    full.append('rows', String(pageSize));
-    full.append('sort', 'kxh');
-    full.append('order', 'asc');
-    variants.push(full);
-
-    const lean = new URLSearchParams();
-    lean.append('xnxqdm', semesterId);
-    lean.append('page', '1');
-    lean.append('rows', String(pageSize));
-    variants.push(lean);
-
-    const withWeek = new URLSearchParams();
-    withWeek.append('zc', '1');
-    withWeek.append('xnxqdm', semesterId);
-    withWeek.append('page', '1');
-    withWeek.append('rows', String(pageSize));
-    variants.push(withWeek);
-
-    let sawLogin = false;
-    for (let i = 0; i < variants.length; i += 1) {
-        try {
-            console.log(`尝试课程 JSON 接口变体 #${i + 1}, xnxqdm=${semesterId}`);
-            const result = await postCourseJson(variants[i]);
-            if (result.loginPage) {
-                sawLogin = true;
-                continue;
-            }
-            if (result.nonJson) {
-                console.warn('课程接口非 JSON:', result.text);
-                continue;
-            }
-            const rawData = result.data;
-            if (!rawData || !Array.isArray(rawData.rows)) continue;
-            if (rawData.rows.length > 0) {
-                console.log(`JSON 接口命中 ${rawData.rows.length} 条, xnxqdm=${semesterId}`);
-                return parseCourses(rawData.rows);
-            }
-            console.log(`JSON 接口变体 #${i + 1} 返回空列表`);
-        } catch (error) {
-            console.warn(`课程 JSON 变体 #${i + 1} 失败`, error);
+async function fetchCoursesFromJsonOnce(semesterId) {
+    // Exactly one POST. Do not iterate semester codes or parameter variants.
+    const body = new URLSearchParams();
+    body.append('xnxqdm', semesterId);
+    body.append('page', '1');
+    body.append('rows', '1000');
+    try {
+        const result = await postCourseJson(body);
+        if (result.loginPage) return { loginPage: true };
+        if (result.nonJson) return { empty: true, preview: result.text || '' };
+        const rawData = result.data;
+        if (!rawData || !Array.isArray(rawData.rows)) return { empty: true, preview: String(result.data && result.data.total) };
+        if (rawData.rows.length > 0) {
+            console.log(`JSON 接口命中 ${rawData.rows.length} 条, xnxqdm=${semesterId}`);
+            return { courses: parseCourses(rawData.rows) };
         }
+        return { empty: true, preview: `total=${rawData.total}` };
+    } catch (error) {
+        console.warn('课程 JSON 请求失败', error);
+        return { empty: true, preview: String(error && error.message || error) };
     }
-    if (sawLogin) {
-        throw new Error('教务接口返回登录页，统一认证会话未建立。请点右上角「读取课表」重试。');
-    }
-    return null;
 }
 
 function parseScheduleTable(htmlText) {
@@ -410,10 +420,12 @@ function parseScheduleTable(htmlText) {
 }
 
 async function fetchCoursesFromHtml(semesterId) {
+    // Two page GETs max: personal schedule page first, then all-course list.
     const urls = [
-        `${url_strings.GET_ALL_COURSES_HTML_URL}?xnxqdm=${encodeURIComponent(semesterId)}`,
-        `${url_strings.GET_ALL_COURSES_HTML_URL_REFERRER}?xnxqdm=${encodeURIComponent(semesterId)}`
+        `${url_strings.GET_ALL_COURSES_HTML_URL_REFERRER}?xnxqdm=${encodeURIComponent(semesterId)}`,
+        `${url_strings.GET_ALL_COURSES_HTML_URL}?xnxqdm=${encodeURIComponent(semesterId)}`
     ];
+    let loginSeen = false;
     for (const url of urls) {
         try {
             const html = await fetchText(url, {
@@ -422,33 +434,58 @@ async function fetchCoursesFromHtml(semesterId) {
                 credentials: 'include',
                 redirect: 'follow'
             });
-            if (looksLikeLoginHtml(html)) continue;
+            if (looksLikeLoginHtml(html)) {
+                loginSeen = true;
+                continue;
+            }
             if (html.indexOf('本学期课表还未开放') >= 0) continue;
+
+            const embedded = extractEmbeddedCourseArrays(html);
+            for (const block of embedded) {
+                const mapped = [];
+                for (const row of block.rows) {
+                    const course = parseCourseLikeObject(row);
+                    if (course) mapped.push(course);
+                }
+                if (mapped.length) {
+                    console.log(`页内嵌 ${block.key} 解析到 ${mapped.length} 条: ${url}`);
+                    return { courses: mapped };
+                }
+            }
+
             const parsed = parseScheduleTable(html);
             if (parsed && parsed.length) {
                 console.log(`HTML 课表解析到 ${parsed.length} 条: ${url}`);
-                return parsed;
+                return { courses: parsed };
             }
+            return { empty: true, preview: html.slice(0, 180).replace(/\s+/g, ' ') };
         } catch (error) {
-            console.warn('HTML 课表回退失败', error);
+            console.warn('HTML 课表获取失败', error);
         }
     }
-    return null;
+    if (loginSeen) return { loginPage: true };
+    return { empty: true, preview: 'no-schedule-html' };
 }
 
 async function fetchCourses(semesterId) {
     try {
-        console.log(`正在获取学期 ${semesterId} 的课程数据...`);
-        const fromJson = await fetchCoursesFromJson(semesterId);
-        if (fromJson && fromJson.length) return fromJson;
+        console.log(`正在获取学期 ${semesterId} 的课程数据（限流：最多 1 次 JSON + 2 次页面）...`);
 
+        // Prefer the same HTML pages the student sees in 课表查询.
         const fromHtml = await fetchCoursesFromHtml(semesterId);
-        if (fromHtml && fromHtml.length) return fromHtml;
-
-        if (await checkSemesterIsOpened(semesterId)) {
-            throw new Error(`学期 ${semesterId} 没有返回课程。请换一个学期重试；若网页课表有课，请把该提示反馈给开发者。`);
+        if (fromHtml && fromHtml.courses && fromHtml.courses.length) return fromHtml.courses;
+        if (fromHtml && fromHtml.loginPage) {
+            throw new Error('教务会话无效（课表页返回登录页）。请重新登录后点「读取课表」。');
         }
-        throw new Error('学期未开放课表查询！');
+
+        const fromJson = await fetchCoursesFromJsonOnce(semesterId);
+        if (fromJson && fromJson.courses && fromJson.courses.length) return fromJson.courses;
+        if (fromJson && fromJson.loginPage) {
+            throw new Error('教务接口返回登录页，统一认证会话未建立。请点「读取课表」重试。');
+        }
+
+        const preview = (fromJson && fromJson.preview) || (fromHtml && fromHtml.preview) || '';
+        throw new Error(`学期 ${semesterId} 未读到课程（接口摘要：${preview || 'empty'}）。网页课表若有课，请把这句原文反馈给开发者。`);
     } catch (error) {
         console.error('添加课程表失败:', error);
         fail(`添加课程失败: ${error.message}`);
@@ -568,22 +605,19 @@ async function saveConfig(config) {
 }
 
 async function ensureJxfwSessionReady() {
-    for (var attempt = 0; attempt < 3; attempt += 1) {
-        try {
-            const text = await fetchText(url_strings.SESSION_PROBE_URL, {
-                method: 'GET',
-                headers: { 'Referer': url_strings.BASE_URL },
-                credentials: 'include',
-                redirect: 'follow'
-            });
-            if (!looksLikeLoginHtml(text)) return true;
-            console.warn(`教务会话探测 #${attempt + 1} 仍是登录页`);
-        } catch (error) {
-            console.warn(`教务会话探测 #${attempt + 1} 失败`, error);
-        }
-        if (attempt < 2) await sleep(250 * (attempt + 1));
+    // One probe only. Repeated polling can trip school rate limits.
+    try {
+        const text = await fetchText(url_strings.SESSION_PROBE_URL, {
+            method: 'GET',
+            headers: { 'Referer': url_strings.BASE_URL },
+            credentials: 'include',
+            redirect: 'follow'
+        });
+        return !looksLikeLoginHtml(text);
+    } catch (error) {
+        console.warn('教务会话探测失败', error);
+        return false;
     }
-    return false;
 }
 
 async function runImportFlow() {
