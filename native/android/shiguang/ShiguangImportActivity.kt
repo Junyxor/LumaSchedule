@@ -43,8 +43,11 @@ class ShiguangImportActivity : Activity() {
     private var manualTrigger: Boolean = false
     private var allowedHosts: Set<String> = emptySet()
     private var insecureTransport: Boolean = false
+    private var primaryLoginHost: String = ""
     private var backNavigationStarted = false
     private var backInvokedCallback: OnBackInvokedCallback? = null
+    private val injectHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var pendingInject: Runnable? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,6 +61,7 @@ class ShiguangImportActivity : Activity() {
         allowedHosts = parseHosts(intent.getStringExtra(EXTRA_ALLOWED_HOSTS_JSON).orEmpty())
         insecureTransport = intent.getBooleanExtra(EXTRA_INSECURE_TRANSPORT, false)
         val importUrl = intent.getStringExtra(EXTRA_IMPORT_URL).orEmpty()
+        primaryLoginHost = runCatching { android.net.Uri.parse(importUrl).host?.lowercase() }.getOrNull().orEmpty()
         if (sessionId.isBlank() || adapterScript.isBlank() || importUrl.isBlank()) {
             finishWithError("教务导入参数不完整")
             return
@@ -67,9 +71,9 @@ class ShiguangImportActivity : Activity() {
         setContentView(buildUi())
         registerSystemBack()
         val initialMessage = when {
-            captureKind == "grades" -> "请登录教务系统，进入成绩查询/历年成绩页面后点击「抓取成绩」。"
-            manualTrigger -> "请登录教务系统，进入个人课表页面并点击查询，再点「尝试抓取课表」。"
-            else -> "请完成教务系统登录，登录成功后会自动读取课表。"
+            captureKind == "grades" -> "请登录教务系统，进入成绩查询/历年成绩页面后点击「读取成绩」。"
+            manualTrigger -> "请登录教务系统，进入个人课表页面并点击查询，再点「读取课表」。"
+            else -> "请完成教务系统登录。登录成功后会自动尝试读取；也可随时点右上角「读取课表」。"
         }
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         prefs.edit()
@@ -115,9 +119,12 @@ class ShiguangImportActivity : Activity() {
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
                 progress.visibility = View.GONE
-                val host = runCatching { android.net.Uri.parse(url).host?.lowercase() }.getOrNull().orEmpty()
-                if (!isHostAllowed(host) || currentStatus() == "complete") return
-                if (!manualTrigger) view.evaluateJavascript(buildInjectionScript(), null)
+                scheduleAutoInject(url)
+            }
+
+            override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                super.doUpdateVisitedHistory(view, url, isReload)
+                if (isReload) scheduleAutoInject(url)
             }
         }
         webView.loadUrl(importUrl)
@@ -158,14 +165,14 @@ class ShiguangImportActivity : Activity() {
         progress = ProgressBar(this).apply { isIndeterminate = true }
         bar.addView(back, LinearLayout.LayoutParams(64.dp, 48.dp))
         bar.addView(titleView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        if (captureKind == "grades" || manualTrigger) {
-            val capture = Button(this).apply {
-                text = if (captureKind == "grades") "抓取成绩" else "尝试抓取课表"
-                isAllCaps = false
-                setOnClickListener { triggerManualCapture() }
-            }
-            bar.addView(capture, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        // Always expose a manual capture control. Official adapters still auto-inject after login,
+        // but SSO redirects / SPA shells can miss onPageFinished; the button is the recovery path.
+        val capture = Button(this).apply {
+            text = if (captureKind == "grades") "读取成绩" else "读取课表"
+            isAllCaps = false
+            setOnClickListener { triggerManualCapture() }
         }
+        bar.addView(capture, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         bar.addView(progress, LinearLayout.LayoutParams(24.dp, 24.dp))
         webView = WebView(this)
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -185,6 +192,7 @@ class ShiguangImportActivity : Activity() {
 
     private fun triggerManualCapture() {
         if (!::webView.isInitialized || currentStatus() == "complete") return
+        cancelPendingInject()
         progress.visibility = View.VISIBLE
         val script = if (captureKind == "grades") {
             "if(typeof window.__LUMA_CAPTURE_GRADES__==='function'){window.__LUMA_CAPTURE_GRADES__();}else{void 0;}"
@@ -194,6 +202,43 @@ class ShiguangImportActivity : Activity() {
         webView.evaluateJavascript(script) { progress.visibility = View.GONE }
     }
 
+    private fun cancelPendingInject() {
+        pendingInject?.let(injectHandler::removeCallbacks)
+        pendingInject = null
+    }
+
+    private fun shouldAutoInject(url: String?): Boolean {
+        if (manualTrigger) return false
+        if (!::webView.isInitialized || currentStatus() == "complete") return false
+        val host = runCatching { android.net.Uri.parse(url).host?.lowercase() }.getOrNull().orEmpty()
+        if (host.isBlank() || !isHostAllowed(host)) return false
+        // Do not fire the adapter on the CAS/login entry page. Wait until SSO lands on the school system.
+        if (host == primaryLoginHost) return false
+        return true
+    }
+
+    private fun scheduleAutoInject(url: String?) {
+        if (!shouldAutoInject(url)) {
+            cancelPendingInject()
+            return
+        }
+        cancelPendingInject()
+        val runnable = Runnable {
+            pendingInject = null
+            if (isFinishing || !::webView.isInitialized) return@Runnable
+            val current = webView.url
+            if (!shouldAutoInject(current)) return@Runnable
+            // Re-check the page is still the same navigation target that scheduled this inject.
+            val scheduledHost = runCatching { android.net.Uri.parse(url).host?.lowercase() }.getOrNull()
+            val currentHost = runCatching { android.net.Uri.parse(current).host?.lowercase() }.getOrNull()
+            if (scheduledHost != null && currentHost != null && scheduledHost != currentHost) return@Runnable
+            webView.evaluateJavascript(buildInjectionScript(), null)
+        }
+        pendingInject = runnable
+        // Give SSO callbacks / SPA shells a short settle window before running the adapter.
+        injectHandler.postDelayed(runnable, 1200)
+    }
+
     private fun buildInjectionScript(): String = """
 (() => {
   if (window.top !== window.self || window.__LUMA_SHIGUANG_BOOTSTRAPPED__) return;
@@ -201,7 +246,8 @@ class ShiguangImportActivity : Activity() {
   const nativeBridge = window.LumaShiguangBridge;
   window.shiguangBridge = {
     showToast(message) { nativeBridge.showToast(String(message)); },
-    notifyTaskCompletion() { nativeBridge.notifyTaskCompletion(); }
+    notifyTaskCompletion() { nativeBridge.notifyTaskCompletion(); },
+    reportError(message) { nativeBridge.reportError(String(message)); }
   };
   window.shiguangBridgePromise = {
     async showAlert(title, message, confirmText) {
@@ -240,7 +286,19 @@ class ShiguangImportActivity : Activity() {
   window.addEventListener('unhandledrejection', event => nativeBridge.reportDiagnostic(String(event.reason || 'page rejection')));
   window.addEventListener('error', event => nativeBridge.reportDiagnostic(String(event.error || event.message || 'page error')));
 
+  const __lumaStartAdapter = () => {
+    try {
 $adapterScript
+    } catch (error) {
+      nativeBridge.reportDiagnostic(String((error && error.stack) || error));
+      nativeBridge.reportError('适配脚本执行失败：' + String((error && error.message) || error));
+    }
+  };
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(__lumaStartAdapter, 250);
+  } else {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(__lumaStartAdapter, 250), { once: true });
+  }
 })();
 """.trimIndent()
 
@@ -434,6 +492,7 @@ $adapterScript
     override fun onBackPressed() = handleBack()
 
     override fun onDestroy() {
+        cancelPendingInject()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             backInvokedCallback?.let { callback ->
                 runCatching { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback) }

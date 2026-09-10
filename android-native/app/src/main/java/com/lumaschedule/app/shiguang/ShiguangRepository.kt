@@ -43,7 +43,7 @@ class ShiguangRepository(private val context: Context) {
         require(adapter.assetJsPath.isNotBlank()) { "适配器脚本路径为空" }
 
         val scriptPath = safeAssetPath("shiguang_warehouse/resources/${school.resourceFolder}/${adapter.assetJsPath}")
-        val script = readAsset(scriptPath)
+        val script = loadAdapterScript(scriptPath)
         return launchSession(
             activity = activity,
             importUrl = adapter.importUrl,
@@ -62,7 +62,7 @@ class ShiguangRepository(private val context: Context) {
         val adapter = adapters(school).firstOrNull()
             ?: error("通用教务解析器没有可用脚本：$family")
         require(adapter.assetJsPath.isNotBlank()) { "通用教务解析器脚本为空" }
-        val script = readAsset(safeAssetPath("shiguang_warehouse/resources/${school.resourceFolder}/${adapter.assetJsPath}"))
+        val script = loadAdapterScript(safeAssetPath("shiguang_warehouse/resources/${school.resourceFolder}/${adapter.assetJsPath}"))
         val displaySchool = schoolName.trim().ifBlank { Uri.parse(url).host.orEmpty() }
         return launchSession(
             activity = activity,
@@ -83,7 +83,7 @@ class ShiguangRepository(private val context: Context) {
             val school = schools().firstOrNull { it.id.equals(detectedFamily, ignoreCase = true) }
             val adapter = school?.let(::adapters)?.firstOrNull()
             if (school != null && adapter != null && adapter.assetJsPath.isNotBlank()) {
-                val script = readAsset(safeAssetPath("shiguang_warehouse/resources/${school.resourceFolder}/${adapter.assetJsPath}"))
+                val script = loadAdapterScript(safeAssetPath("shiguang_warehouse/resources/${school.resourceFolder}/${adapter.assetJsPath}"))
                 return launchSession(
                     activity = activity,
                     importUrl = url,
@@ -352,6 +352,23 @@ class ShiguangRepository(private val context: Context) {
         .open(safeAssetPath(path))
         .bufferedReader(StandardCharsets.UTF_8)
         .use { it.readText() }
+
+    /**
+     * Prefer first-party adapter overrides shipped outside the upstream warehouse
+     * snapshot, then fall back to the bundled shiguang script.
+     */
+    private fun loadAdapterScript(warehousePath: String): String {
+        val normalized = safeAssetPath(warehousePath)
+        val marker = "shiguang_warehouse/resources/"
+        val overridePath = if (normalized.startsWith(marker)) {
+            "shiguang_overrides/" + normalized.removePrefix(marker)
+        } else {
+            "shiguang_overrides/$normalized"
+        }
+        val override = runCatching { readAsset(overridePath) }.getOrNull()
+        if (!override.isNullOrBlank()) return override
+        return readAsset(normalized)
+    }
 
     private fun safeAssetPath(path: String): String {
         val normalized = path.replace('\\', '/').trimStart('/')
