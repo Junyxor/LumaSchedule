@@ -467,25 +467,98 @@ async function fetchCoursesFromHtml(semesterId) {
     return { empty: true, preview: 'no-schedule-html' };
 }
 
+function parseKbRqCourses(kbRes) {
+    // getKbRq returns one week's meetings. Fields used by the official calendar JS:
+    // kcmc, teaxms, jxcdmc, xq, jcdm2 ("1,2"), jcdm, zc, kxh
+    const courses = [];
+    if (!Array.isArray(kbRes)) return courses;
+    for (const raw of kbRes) {
+        const day = Number(raw.xq);
+        if (!(day >= 1 && day <= 7)) continue;
+        let sections = [];
+        const jcdm2 = String(raw.jcdm2 || '').trim();
+        if (jcdm2) {
+            sections = jcdm2.split(',').map(function (s) { return Number(String(s).trim()); }).filter(function (n) { return !isNaN(n) && n > 0; });
+        }
+        if (!sections.length) {
+            const pad = String(raw.jcdm || '').match(/\d{2}/g);
+            if (pad) sections = pad.map(Number);
+        }
+        if (!sections.length) continue;
+        const name = decodeHtmlEntities(raw.kcmc || '').trim();
+        if (!name) continue;
+        const week = Number(raw.zc);
+        courses.push({
+            name: name,
+            teacher: decodeHtmlEntities(raw.teaxms || '').trim(),
+            position: decodeHtmlEntities(raw.jxcdmc || '').trim(),
+            day: day,
+            startSection: sections[0],
+            endSection: sections[sections.length - 1],
+            weeks: isNaN(week) ? [] : [week],
+            isCustomTime: false
+        });
+    }
+    return courses;
+}
+
+async function fetchCoursesByWeek(semesterId) {
+    // The official 周课表 page only loads courses when a specific week (zc) is set.
+    // getDataList stays empty for many students, so walk weeks 1..16 via getKbRq.
+    // 16 GETs for ONE semester only — never scan other terms.
+    const maxWeek = 16;
+    const delayMs = 120;
+    toastOnly(`正在按周读取 ${semesterId} 课表（约 ${maxWeek} 次请求）…`);
+    let loginSeen = false;
+    const all = [];
+    for (let week = 1; week <= maxWeek; week += 1) {
+        const url = `${url_strings.GET_WEEK_COURSES_API_URL}?xnxqdm=${encodeURIComponent(semesterId)}&zc=${week}`;
+        try {
+            const text = await fetchText(url, {
+                method: 'GET',
+                headers: { 'Referer': url_strings.SEMESTER_SOURCE_URL },
+                credentials: 'include'
+            });
+            if (looksLikeLoginHtml(text)) {
+                loginSeen = true;
+                break;
+            }
+            let payload = null;
+            try { payload = JSON.parse(text); } catch (e) { continue; }
+            if (!Array.isArray(payload) || !Array.isArray(payload[0])) continue;
+            const rows = parseKbRqCourses(payload[0]);
+            if (rows.length) {
+                console.log(`第 ${week} 周读到 ${rows.length} 条`);
+                all.push.apply(all, rows);
+            }
+        } catch (error) {
+            console.warn(`第 ${week} 周课表失败`, error);
+        }
+        if (week < maxWeek) await sleep(delayMs);
+    }
+    if (loginSeen) return { loginPage: true };
+    if (!all.length) return { empty: true, preview: `no-kbrq-rows weeks=1..${maxWeek}` };
+    return { courses: all };
+}
+
 async function fetchCourses(semesterId) {
     try {
-        console.log(`正在获取学期 ${semesterId} 的课程数据（限流：最多 1 次 JSON + 2 次页面）...`);
+        console.log(`正在获取学期 ${semesterId} 的课程数据（周课表 getKbRq）...`);
 
-        // Prefer the same HTML pages the student sees in 课表查询.
+        const fromWeeks = await fetchCoursesByWeek(semesterId);
+        if (fromWeeks && fromWeeks.courses && fromWeeks.courses.length) return fromWeeks.courses;
+        if (fromWeeks && fromWeeks.loginPage) {
+            throw new Error('教务会话无效（课表接口返回登录页）。请重新登录后点「读取课表」。');
+        }
+
+        // Last resort: one HTML page + one getDataList (legacy path).
         const fromHtml = await fetchCoursesFromHtml(semesterId);
         if (fromHtml && fromHtml.courses && fromHtml.courses.length) return fromHtml.courses;
-        if (fromHtml && fromHtml.loginPage) {
-            throw new Error('教务会话无效（课表页返回登录页）。请重新登录后点「读取课表」。');
-        }
-
         const fromJson = await fetchCoursesFromJsonOnce(semesterId);
         if (fromJson && fromJson.courses && fromJson.courses.length) return fromJson.courses;
-        if (fromJson && fromJson.loginPage) {
-            throw new Error('教务接口返回登录页，统一认证会话未建立。请点「读取课表」重试。');
-        }
 
-        const preview = (fromJson && fromJson.preview) || (fromHtml && fromHtml.preview) || '';
-        throw new Error(`学期 ${semesterId} 未读到课程（接口摘要：${preview || 'empty'}）。网页课表若有课，请把这句原文反馈给开发者。`);
+        const preview = (fromWeeks && fromWeeks.preview) || (fromJson && fromJson.preview) || (fromHtml && fromHtml.preview) || '';
+        throw new Error(`学期 ${semesterId} 未读到课程（摘要：${preview || 'empty'}）。请确认网页「周课表」在选中某一周时有课。`);
     } catch (error) {
         console.error('添加课程表失败:', error);
         fail(`添加课程失败: ${error.message}`);

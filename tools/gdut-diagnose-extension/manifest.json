@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "广工课表诊断",
+  "version": "1.0.0",
+  "description": "在已登录的广工教务页上，手动抓取一次课表相关响应，供 LumaSchedule 排查导入问题。",
+  "permissions": ["scripting", "activeTab", "downloads"],
+  "host_permissions": [
+    "https://jxfw.gdut.edu.cn/*",
+    "https://authserver.gdut.edu.cn/*"
+  ],
+  "action": {
+    "default_title": "广工课表诊断（仅当前页，约 4 次请求）"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "icons": {}
+}

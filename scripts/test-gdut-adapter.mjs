@@ -73,6 +73,7 @@ async function runScenario({
   probeBody = SEMESTER_HTML,
   allKbBody = '<html>opened</html>',
   coursePayload = HAPPY_ROWS,
+  emptyWeeks = false,
   expectError
 }) {
   const captured = {
@@ -126,12 +127,49 @@ async function runScenario({
         };
       }
       if (url.includes('xsgrkbcx!getKbRq.action')) {
+        const weekMatch = String(url).match(/[?&]zc=(\d+)/);
+        const week = weekMatch ? Number(weekMatch[1]) : 1;
+        const kb = [];
+        if (!emptyWeeks) {
+          if (week === 1) {
+            kb.push(
+              {
+                kcmc: '高等数学&amp;A',
+                teaxms: '张老师',
+                jxcdmc: '教1-101',
+                xq: '1',
+                jcdm: '0102',
+                jcdm2: '1,2',
+                zc: '1'
+              },
+              {
+                kcmc: '大学英语',
+                teaxms: '',
+                jxcdmc: '教3-202',
+                xq: '3',
+                jcdm: '0506',
+                jcdm2: '5,6',
+                zc: '1'
+              }
+            );
+          } else if (week === 2) {
+            kb.push({
+              kcmc: '高等数学&amp;A',
+              teaxms: '张老师',
+              jxcdmc: '教1-101',
+              xq: '1',
+              jcdm: '0102',
+              jcdm2: '1,2',
+              zc: '2'
+            });
+          }
+        }
         return {
           ok: true,
           status: 200,
           async text() {
             return JSON.stringify([
-              {},
+              kb,
               [
                 { xqmc: '1', rq: '2026-09-07' },
                 { xqmc: '2', rq: '2026-09-08' }
@@ -209,7 +247,7 @@ async function runScenario({
   const source = fs.readFileSync(scriptPath, 'utf8');
   const result = vm.runInContext(source, context, { filename: scriptPath });
   if (result && typeof result.then === 'function') await result;
-  for (let i = 0; i < 80; i += 1) {
+  for (let i = 0; i < 200; i += 1) {
     if (captured.completed || captured.errors.length) break;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
@@ -241,13 +279,13 @@ async function runScenario({
 
 const happy = await runScenario({ label: 'happy-path' });
 if (!Array.isArray(happy.courses) || happy.courses.length !== 3) {
-  throw new Error(`happy-path: expected 3 raw course meetings, got ${happy.courses?.length ?? 'none'}`);
+  throw new Error(`happy-path: expected 3 raw course meetings, got ${happy.courses?.length ?? 'none'} ${JSON.stringify(happy.courses)}`);
 }
 if (happy.courses[0].name !== '高等数学&A') {
   throw new Error(`happy-path: HTML entity decoding regressed: ${happy.courses[0].name}`);
 }
 if (happy.courses[0].startSection !== 1 || happy.courses[0].endSection !== 2) {
-  throw new Error('happy-path: section parsing regressed for jcdm=0102');
+  throw new Error('happy-path: section parsing regressed for jcdm2=1,2');
 }
 if (!Array.isArray(happy.slots) || happy.slots.length !== 14) {
   throw new Error(`happy-path: expected 14 time slots, got ${happy.slots?.length ?? 'none'}`);
@@ -300,6 +338,7 @@ if (htmlLogin.completed) {
 const emptyCourses = await runScenario({
   label: 'empty-json',
   coursePayload: { total: 0, rows: [] },
+  emptyWeeks: true,
   allKbBody: '<html>本学期课表还未开放，请稍后查询！</html>',
   expectError: true
 });
