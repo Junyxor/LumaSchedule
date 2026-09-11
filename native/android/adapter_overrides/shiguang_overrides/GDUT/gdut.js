@@ -155,7 +155,7 @@ async function fetchText(url, init) {
 }
 
 async function discoverSemesters() {
-    // Prime the classic schedule entry so the session has visited 课表查询.
+    // One GET of the semester shell. Also acts as the session probe.
     try {
         const html = await fetchText(url_strings.SEMESTER_SOURCE_URL, {
             method: 'GET',
@@ -165,35 +165,20 @@ async function discoverSemesters() {
         });
         if (looksLikeLoginHtml(html)) {
             console.warn('学期来源页返回登录页');
-        } else {
-            const fromPage = extractSemesterOptions(html);
-            if (fromPage && fromPage.length) {
-                console.log(`从教务页解析到 ${fromPage.length} 个学期选项`);
-                return fromPage;
-            }
+            return { login: true };
+        }
+        const fromPage = extractSemesterOptions(html);
+        if (fromPage && fromPage.length) {
+            console.log(`从教务页解析到 ${fromPage.length} 个学期选项`);
+            return { options: fromPage };
         }
     } catch (error) {
         console.warn('解析教务学期下拉框失败', error);
     }
 
-    // Second chance: the all-course list page often carries the same select.
-    try {
-        const html = await fetchText(url_strings.GET_ALL_COURSES_HTML_URL, {
-            method: 'GET',
-            headers: { 'Referer': url_strings.SEMESTER_SOURCE_URL },
-            credentials: 'include',
-            redirect: 'follow'
-        });
-        if (!looksLikeLoginHtml(html)) {
-            const fromPage = extractSemesterOptions(html);
-            if (fromPage && fromPage.length) return fromPage;
-        }
-    } catch (error) {
-        console.warn('解析全量课表页学期失败', error);
-    }
-
+    // Offline/guessed list only when the page itself had no select (not for login pages).
     console.log('回退到本地推算学期列表');
-    return buildFallbackSemesters();
+    return { options: buildFallbackSemesters() };
 }
 
 async function stepDescriptionAlert() {
@@ -732,11 +717,13 @@ async function runImportFlow() {
             await sleep(800);
         }
 
-        const sessionReady = await ensureJxfwSessionReady();
-        if (!sessionReady) {
-            toastOnly("教务会话未就绪（接口仍返回登录页）。若已登录，请点右上角「读取课表」重试。");
+        // discoverSemesters() already GETs the semester shell and detects login pages.
+        const discovered = await discoverSemesters();
+        if (discovered && discovered.login) {
+            toastOnly("教务会话未就绪（接口返回登录页）。请重新登录后点底部「读取课表」。");
             return;
         }
+        const semesterOptions = (discovered && discovered.options) || [];
 
         const result = await stepDescriptionAlert();
         if (!result) {
@@ -744,7 +731,6 @@ async function runImportFlow() {
             return;
         }
 
-        const semesterOptions = await discoverSemesters();
         const selected = await selectSemesterSelection(semesterOptions);
         if (!selected) {
             console.log("用户取消了学期选择，停止后续执行。");
