@@ -90,3 +90,20 @@ if (!source.includes('https://jxfw.gdut.edu.cn')) {
 }
 
 console.log(`GDUT contract validated: ${path.relative(warehouse, scriptPath)} -> ${login.hostname} -> ${target.hostname}`);
+
+const overrideScript = path.join(root, 'native', 'android', 'adapter_overrides', 'shiguang_overrides', 'GDUT', 'gdut.js');
+if (fs.existsSync(overrideScript)) {
+  const overrideSource = fs.readFileSync(overrideScript, 'utf8');
+  for (const call of requiredCalls) {
+    if (!overrideSource.includes(call)) {
+      throw new Error(`GDUT override no longer calls ${call}; re-check LumaSchedule bridge compatibility.`);
+    }
+  }
+  if (!overrideSource.includes('https://jxfw.gdut.edu.cn')) {
+    throw new Error('GDUT override no longer references jxfw.gdut.edu.cn.');
+  }
+  if (!overrideSource.includes('reportError') && !overrideSource.includes('shiguangBridge.reportError')) {
+    throw new Error('GDUT override should surface failures via shiguangBridge.reportError.');
+  }
+  console.log(`GDUT override validated: ${path.relative(root, overrideScript)}`);
+}

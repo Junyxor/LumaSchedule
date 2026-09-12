@@ -106,6 +106,22 @@ Kotlin SQLite transaction
 
 LumaSchedule 不读取或保存用户的 GDUT 密码；登录凭据只在学校官方登录 WebView / Cookie 会话中使用。
 
+### 本地 Adapter Override
+
+上游 `vendor/shiguang_warehouse` 会在同步时被整目录覆盖。需要在 LumaSchedule 侧长期修复的学校脚本放在：
+
+```text
+native/android/adapter_overrides/shiguang_overrides/<SCHOOL>/<script>.js
+```
+
+运行时优先加载 override，找不到再回退到上游快照。当前内置 `GDUT/gdut.js` 覆盖：
+
+- 登录后先探测旧版课表接口是否仍返回 HTML 登录页；
+- 识别统一认证会话未建立，并提示用户点「读取课表」重试；
+- 通过 `shiguangBridge.reportError` 把硬错误回传主界面。
+
+导入 WebView 同时提供常驻「读取课表 / 读取成绩」按钮：SSO 回调或页面跳转偶发未触发自动注入时，可手动恢复。
+
 ## 其他平台
 
 当前 v0.1 将 Android 作为唯一正式 Adapter 运行平台。Rust/Tauri 历史实现保存在 `archive/rust-tauri-v0.1` 分支，用于回溯和架构参考；未来若重新做 Desktop/iOS，会重新设计对应的隔离运行时，不会因为历史代码存在就宣称已经具备同等级安全边界。
