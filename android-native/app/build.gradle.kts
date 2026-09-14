@@ -45,6 +45,8 @@ android {
             // Vite output and the build-time synchronized adapter snapshot are packaged directly.
             assets.srcDir("../../dist")
             assets.srcDir("../../vendor")
+            // First-party school adapter overrides that survive upstream snapshot resyncs.
+            assets.srcDir("../../native/android/adapter_overrides")
             res.srcDir("../../native/android/res")
             // The Shiguang login Activity is already plain Android Kotlin and has no Tauri dependency.
             java.srcDir("../../native/android/shiguang")

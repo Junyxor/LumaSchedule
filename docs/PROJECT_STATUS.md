@@ -47,7 +47,7 @@
 - [x] 兼容旧教务 HTTP：仅适配器声明时开放对应机构域名，并在 UI 显示明文传输风险警告
 - [x] adapter 脚本不能通过源码里的任意 URL 自行扩大域名权限，只接受登录 / SSO 声明的同机构域名
 - [x] adapter 输出进入统一 `ImportBundle` 预览，不直接写数据库
-- [x] GDUT adapter 已作为首个真实目标接入（实际账号登录仍需真机验收）
+- [x] GDUT adapter 已作为首个真实目标接入，并增加本地 override（SSO 会话探测 + 常驻手动读取按钮）；实际账号登录仍需真机验收
 
 ### Android 系统能力
 - [x] 2×1 RemoteViews 下一节课 Widget
