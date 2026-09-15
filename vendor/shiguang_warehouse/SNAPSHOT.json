@@ -1,9 +1,9 @@
 {
   "source": "https://github.com/XingHeYuZhuan/shiguang_warehouse",
-  "revision": "208867cc58d48aba90b5c36365e6fe23df30863c",
-  "schoolCount": 208,
-  "adapterScriptCount": 224,
-  "adapterManifestCount": 208,
-  "generatedAt": "2026-09-14T09:04:35.244Z",
+  "revision": "f938f8c72a6e8672f9331e51bdf9c5edd1681ee8",
+  "schoolCount": 210,
+  "adapterScriptCount": 226,
+  "adapterManifestCount": 210,
+  "generatedAt": "2026-09-15T08:47:33.191Z",
   "bootstrap": false
 }
