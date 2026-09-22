@@ -6,6 +6,7 @@ import android.appwidget.AppWidgetManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.SystemClock
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -175,6 +176,15 @@ class LumaBridge(
 
             "request_notification_permission" -> JSONObject()
                 .put("value", activity.ensureNotificationPermissionBlocking())
+                .toString()
+
+            "get_exact_alarm_status" -> JSONObject()
+                .put("required", Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                .put("granted", activity.canScheduleExactAlarms())
+                .toString()
+
+            "request_exact_alarm_access" -> JSONObject()
+                .put("value", activity.requestExactAlarmAccess())
                 .toString()
 
             "schedule_native_reminder" -> JSONObject()
@@ -499,6 +509,20 @@ class LumaBridge(
                 .ifBlank { "LumaSchedule/lumaschedule-latest.luma.json" }
         )
 
+    fun refreshRemindersFromLifecycle() {
+        executor.execute {
+            runCatching { resyncRemindersIfEnabled() }
+                .onFailure {
+                    DiagnosticLog.record(
+                        activity.applicationContext,
+                        "WARN",
+                        "reminders.lifecycle_resync_failed",
+                        it.message.orEmpty()
+                    )
+                }
+        }
+    }
+
     private fun resyncRemindersIfEnabled() {
         val enabled = database.getSettingRaw("reminders.course.default")
             ?.let { runCatching { JSONObject(it).optBoolean("enabled", false) }.getOrDefault(false) }
@@ -565,7 +589,22 @@ class LumaBridge(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val manager = activity.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+        val scheduled = runCatching {
+            if (activity.canScheduleExactAlarms()) {
+                manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+            } else {
+                manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+            }
+        }.recoverCatching {
+            manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+        }.isSuccess
+        if (!scheduled) return false
+        DiagnosticLog.record(
+            activity.applicationContext,
+            "INFO",
+            "reminders.test_scheduled",
+            "id=" + id + " triggerAt=" + triggerAt + " exact=" + activity.canScheduleExactAlarms()
+        )
         val stored = JSONObject()
             .put("id", id)
             .put("triggerAtEpochMs", triggerAt)

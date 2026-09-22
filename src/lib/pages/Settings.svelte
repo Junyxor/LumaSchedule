@@ -3,13 +3,15 @@
   import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import ConfirmSheet from '../components/ConfirmSheet.svelte';
   import { defaultGlass } from '../state';
-  import type { CourseReminderSettings, GlassSettings, SchedulePreferences, UpdateCheckResult, WebDavCredentials, WebDavProfile, WeekendMode } from '../types';
+  import type { CourseReminderSettings, ExactAlarmStatus, GlassSettings, SchedulePreferences, UpdateCheckResult, WebDavCredentials, WebDavProfile, WeekendMode } from '../types';
   import {
     checkForUpdates,
     ensureNotificationPermission,
     getBootstrap,
     getCourseReminderSettings,
+    getExactAlarmStatus,
     getWebDavProfile,
+    requestExactAlarmAccess,
     restoreFullBackupFromFile,
     restoreWebDavBackup,
     saveCourseReminderSettings,
@@ -55,6 +57,7 @@
   let diagnosticBusy = false;
   let diagnosticStatus = '';
   let reminder: CourseReminderSettings = { enabled: false, offsetMinutes: 15 };
+  let exactAlarm: ExactAlarmStatus = { required: false, granted: true };
   let reminderBusy = false;
   let reminderStatus = '';
   let scheduleBusy = false;
@@ -80,20 +83,38 @@
 
   onMount(async () => {
     scheduleDraft = { ...preferences, weekendMode: preferences.weekendMode ?? (preferences.showWeekend === false ? 'weekdays' : 'auto') };
-    const [profileResult, reminderResult, bootstrapResult] = await Promise.allSettled([
+    const [profileResult, reminderResult, bootstrapResult, exactAlarmResult] = await Promise.allSettled([
       getWebDavProfile(),
       getCourseReminderSettings(),
-      getBootstrap()
+      getBootstrap(),
+      getExactAlarmStatus()
     ]);
     if (profileResult.status === 'fulfilled') webdav = profileResult.value;
     if (reminderResult.status === 'fulfilled') reminder = reminderResult.value;
     if (bootstrapResult.status === 'fulfilled') appVersion = bootstrapResult.value.appVersion;
+    if (exactAlarmResult.status === 'fulfilled') exactAlarm = exactAlarmResult.value;
+    window.addEventListener('focus', refreshExactAlarmStatus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
   });
 
   onDestroy(() => {
     if (glassSaveTimer) clearTimeout(glassSaveTimer);
+    window.removeEventListener('focus', refreshExactAlarmStatus);
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
     void saveGlassSettings(glass);
   });
+
+  async function refreshExactAlarmStatus() {
+    try {
+      exactAlarm = await getExactAlarmStatus();
+    } catch {
+      // Keep the last known state if the native bridge is temporarily unavailable.
+    }
+  }
+
+  function handleVisibilityChange() {
+    if (document.visibilityState === 'visible') void refreshExactAlarmStatus();
+  }
 
   function openSection(section: SettingsSection) {
     activeSection = section;
@@ -162,9 +183,18 @@
 
   function credentials(): WebDavCredentials { return { ...webdav, password: webdavPassword }; }
 
-  function reminderSummary(futureCount: number, scheduledCount = 0, cancelledCount = 0) {
-    const changes = [scheduledCount ? `新增 ${scheduledCount}` : '', cancelledCount ? `取消 ${cancelledCount}` : ''].filter(Boolean).join('，');
-    return `已安排 ${futureCount} 个未来课程提醒${changes ? `（${changes}）` : ''}。`;
+  function reminderSummary(futureCount: number, scheduledCount = 0, cancelledCount = 0, exact = exactAlarm.granted) {
+    const changes = [scheduledCount ? `重新挂载 ${scheduledCount}` : '', cancelledCount ? `取消 ${cancelledCount}` : ''].filter(Boolean).join('，');
+    const precision = exact ? '' : ' 当前未授予精确定时权限，系统可能延迟提醒。';
+    return `已安排 ${futureCount} 个未来课程提醒${changes ? `（${changes}）` : ''}。${precision}`;
+  }
+
+  async function grantExactAlarmAccess() {
+    reminderStatus = '';
+    const opened = await requestExactAlarmAccess();
+    reminderStatus = opened
+      ? '已打开系统“闹钟和提醒”设置。允许 LumaSchedule 后返回应用，未来提醒会自动重新挂载。'
+      : '无法打开系统精确定时设置，请在系统应用设置中允许“闹钟和提醒”。';
   }
 
   async function setReminderEnabled() {
@@ -178,10 +208,17 @@
         return;
       }
       reminder = await saveCourseReminderSettings({ ...reminder, enabled });
-      const report = await syncCourseReminders();
-      reminderStatus = enabled
-        ? reminderSummary(report.futureCount, report.scheduledCount, report.cancelledCount)
-        : `课程提醒已关闭，取消 ${report.cancelledCount} 个未来提醒。`;
+      if (enabled) {
+        exactAlarm = await getExactAlarmStatus();
+        const report = await syncCourseReminders();
+        reminderStatus = reminderSummary(report.futureCount, report.scheduledCount, report.cancelledCount, report.exactAlarmGranted);
+        if (exactAlarm.required && !exactAlarm.granted) {
+          await grantExactAlarmAccess();
+        }
+      } else {
+        const report = await syncCourseReminders();
+        reminderStatus = `课程提醒已关闭，取消 ${report.cancelledCount} 个未来提醒。`;
+      }
     } catch (error) {
       reminderStatus = error instanceof Error ? error.message : String(error);
     } finally {
@@ -197,7 +234,8 @@
       reminder = await saveCourseReminderSettings({ ...reminder, offsetMinutes });
       if (reminder.enabled) {
         const report = await syncCourseReminders();
-        reminderStatus = reminderSummary(report.futureCount, report.scheduledCount, report.cancelledCount);
+        exactAlarm = { ...exactAlarm, granted: report.exactAlarmGranted };
+        reminderStatus = reminderSummary(report.futureCount, report.scheduledCount, report.cancelledCount, report.exactAlarmGranted);
       } else {
         reminderStatus = `默认提前 ${offsetMinutes} 分钟，开启课程提醒后生效。`;
       }
@@ -218,8 +256,9 @@
         return;
       }
       const report = await syncCourseReminders();
+      exactAlarm = { ...exactAlarm, granted: report.exactAlarmGranted };
       reminderStatus = report.enabled
-        ? reminderSummary(report.futureCount, report.scheduledCount, report.cancelledCount)
+        ? reminderSummary(report.futureCount, report.scheduledCount, report.cancelledCount, report.exactAlarmGranted)
         : '课程提醒当前处于关闭状态。';
     } catch (error) {
       reminderStatus = error instanceof Error ? error.message : String(error);
@@ -380,6 +419,12 @@
         <article class="settings-card glass-panel">
           <div class="settings-title"><span><Bell size={19}/></span><div><b>课程提醒</b><p>由 Android 原生 AlarmManager 调度。</p></div></div>
           <button class="toggle-row" on:click={setReminderEnabled} disabled={reminderBusy}><span><b>上课前提醒</b><small>{reminder.enabled?`每节课提前 ${reminder.offsetMinutes} 分钟`:'当前关闭'}</small></span><i class:on={reminder.enabled}></i></button>
+          {#if exactAlarm.required}
+            <button class="setting-row" on:click={grantExactAlarmAccess} disabled={exactAlarm.granted || reminderBusy}>
+              <div><b>精确定时</b><span>{exactAlarm.granted?'已获得系统“闹钟和提醒”权限，可按设定时间精确触发':'未授权时 Android 可能延迟课程提醒'}</span></div>
+              <em>{exactAlarm.granted?'已授权':'去授权'}</em>
+            </button>
+          {/if}
           <div class="reminder-offsets">{#each reminderOffsets as offset}<button class:active={reminder.offsetMinutes===offset} on:click={()=>setReminderOffset(offset)} disabled={reminderBusy}>{offset===60?'1 小时':`${offset} 分钟`}</button>{/each}</div>
           <button class="setting-row" on:click={resyncReminders} disabled={reminderBusy}><div><b>重新同步未来提醒</b><span>课表变化后重新计算</span></div><em>同步</em></button>
           <button class="setting-row" on:click={testNotification}><div><b>即时测试通知</b><span>验证通知权限与通知渠道</span></div><em>立即</em></button>

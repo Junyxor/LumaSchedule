@@ -5,6 +5,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.database.sqlite.SQLiteDatabase
+import android.os.Build
+import com.lumaschedule.app.DiagnosticLog
 import com.lumaschedule.app.widgets.BootReceiver
 import com.lumaschedule.app.widgets.ReminderReceiver
 import org.json.JSONArray
@@ -86,12 +88,25 @@ class CourseReminderEngine(private val context: Context) {
             val previousIds = previous.toSet()
             val stale = previousIds - desiredIds
             val cancelled = stale.count { cancel(it) }
+
+            // Re-arm every future reminder on each sync. Android/OEM battery policies,
+            // force-stop, exact-alarm permission changes, or package updates can remove
+            // alarms while our persisted ID list still exists.
             var scheduled = 0
-            desired.forEach { (id, reminder) ->
-                if (id !in previousIds && schedule(reminder)) scheduled++
+            desired.values.forEach { reminder ->
+                if (schedule(reminder)) scheduled++
             }
+
             saveIds(db, desiredIds.sorted())
+            val exact = canScheduleExactAlarms()
+            DiagnosticLog.record(
+                context,
+                "INFO",
+                "reminders.sync",
+                "future=" + desiredIds.size + " scheduled=" + scheduled + " cancelled=" + cancelled + " skipped=" + skipped + " exact=" + exact
+            )
             return report(true, desiredIds.size, scheduled, cancelled, skipped)
+                .put("exactAlarmGranted", exact)
         } finally {
             db.close()
         }
@@ -135,7 +150,21 @@ class CourseReminderEngine(private val context: Context) {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAt, pending)
+        val exact = canScheduleExactAlarms()
+        val scheduled = runCatching {
+            if (exact) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAt, pending)
+            } else {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAt, pending)
+            }
+        }.recoverCatching {
+            // Permission state can change between the capability check and scheduling.
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAt, pending)
+        }.isSuccess
+        if (!scheduled) {
+            DiagnosticLog.record(context, "WARN", "reminders.schedule_failed", "id=" + reminder.id)
+            return false
+        }
         val stored = JSONObject()
             .put("id", reminder.id)
             .put("triggerAtEpochMs", reminder.triggerAt)
@@ -206,12 +235,16 @@ class CourseReminderEngine(private val context: Context) {
         return if (id == 0) 1 else id
     }
 
+    private fun canScheduleExactAlarms(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
+
     private fun report(enabled: Boolean, future: Int, scheduled: Int, cancelled: Int, skipped: Int) = JSONObject()
         .put("enabled", enabled)
         .put("futureCount", future)
         .put("scheduledCount", scheduled)
         .put("cancelledCount", cancelled)
         .put("skippedCount", skipped)
+        .put("exactAlarmGranted", canScheduleExactAlarms())
 
     private data class ScheduleContext(
         val scheduleId: String,

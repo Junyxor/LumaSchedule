@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.lumaschedule.app.DiagnosticLog
 import com.lumaschedule.app.MainActivity
 
 class ReminderReceiver : BroadcastReceiver() {
@@ -19,6 +20,7 @@ class ReminderReceiver : BroadcastReceiver() {
             NotificationChannel(CHANNEL_ID, "课程提醒", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "上课、调课和课前提醒"
                 enableVibration(true)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
         )
         val launch = PendingIntent.getActivity(
@@ -35,8 +37,10 @@ class ReminderReceiver : BroadcastReceiver() {
             .setContentIntent(launch)
             .setAutoCancel(true)
             .setCategory(Notification.CATEGORY_REMINDER)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
             .build()
         manager.notify(id, notification)
+        DiagnosticLog.record(context, "INFO", "reminders.fired", "id=" + id)
         context.getSharedPreferences(BootReceiver.PREFS_NAME, Context.MODE_PRIVATE)
             .edit().remove(BootReceiver.key(id)).apply()
     }

@@ -2,6 +2,7 @@ package com.lumaschedule.app
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlarmManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -9,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.View
 import android.view.Window
 import android.view.WindowManager
@@ -200,6 +202,26 @@ class MainActivity : Activity() {
         ByteArrayInputStream(ByteArray(0))
     )
 
+    fun canScheduleExactAlarms(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        val manager = getSystemService(ALARM_SERVICE) as AlarmManager
+        return manager.canScheduleExactAlarms()
+    }
+
+    fun requestExactAlarmAccess(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || canScheduleExactAlarms()) return true
+        return runCatching {
+            runOnUiThread {
+                startActivity(
+                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                )
+            }
+            true
+        }.getOrDefault(false)
+    }
+
     fun ensureNotificationPermissionBlocking(): Boolean {
         if (Build.VERSION.SDK_INT < 33) return true
         if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return true
@@ -274,6 +296,11 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (::webView.isInitialized && webView.canGoBack()) webView.goBack() else super.onBackPressed()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::bridge.isInitialized) bridge.refreshRemindersFromLifecycle()
     }
 
     override fun onDestroy() {
