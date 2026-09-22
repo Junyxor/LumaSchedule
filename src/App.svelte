@@ -13,6 +13,7 @@
 
   let page: PageId = 'today';
   let glass: GlassSettings = { ...defaultGlass };
+  let colorfulCourses = typeof localStorage !== 'undefined' ? localStorage.getItem('luma.colorfulCourses') === 'true' : false;
   let scheduleSnapshot: ScheduleSnapshot = { courses: [], hasSchedule: false };
   let schedulePreferences: SchedulePreferences = {
     hasSchedule: false,
@@ -143,7 +144,7 @@
   $: cssVars = `--glass-blur:${glass.blur}px;--glass-opacity:${glass.opacity / 100};--glass-sat:${glass.saturation}%;--glass-highlight:${glass.highlight / 100};--glass-refraction:${glass.refraction / 100};--glass-noise:${glass.noise / 100}`;
 </script>
 
-<div class="app-shell" style={cssVars} class:motion={glass.motion} class:runtime-ready={runtimeReady}>
+<div class="app-shell" style={cssVars} class:motion={glass.motion} class:runtime-ready={runtimeReady} class:colorful-courses={colorfulCourses}>
   <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
   <aside class="sidebar glass-panel">
     <button class="brand" aria-label="返回今日" on:click={() => (page = 'today')}><span class="brand-mark"><Sparkles size={20} strokeWidth={1.8} /></span><span class="brand-copy"><b>Luma</b><small>Schedule</small></span></button>
@@ -154,7 +155,7 @@
     {#if page === 'today'}
       <Today courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} preferences={schedulePreferences} />
     {:else if page === 'week'}
-      <Week courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} preferences={schedulePreferences} on:changed={loadRuntimeData} />
+      <Week courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} preferences={schedulePreferences} {colorfulCourses} on:changed={loadRuntimeData} />
     {:else if page === 'grades'}
       <Grades />
     {:else if page === 'import'}
@@ -162,7 +163,7 @@
     {:else if page === 'widgets'}
       <Widgets />
     {:else}
-      <Settings bind:glass preferences={schedulePreferences} on:changed={loadRuntimeData} />
+      <Settings bind:glass bind:colorfulCourses preferences={schedulePreferences} on:changed={loadRuntimeData} />
     {/if}
   </main>
   <nav class="mobile-nav glass-panel" aria-label="主导航">{#each nav as item}<button class:active={page === item.id} on:click={() => (page = item.id)} aria-label={item.label}><svelte:component this={item.icon} size={20} strokeWidth={1.8} /><span>{item.label}</span></button>{/each}</nav>
