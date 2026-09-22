@@ -13,6 +13,7 @@
   export let displayDate: Date | null = null;
   export let showTopbar = true;
   export let addRequest = 0;
+  export let colorfulCourses = false;
   export let preferences: SchedulePreferences = {
     hasSchedule: false,
     termName: '',
@@ -408,6 +409,7 @@
   <div
     class="week-board time-proportional"
     class:compact={preferences.compactMode}
+    class:colorful-courses={colorfulCourses}
     style={`--day-count:${dayCount};--axis-width:42px;--time-row-count:${timelineRowCount};--time-step-height:${preferences.compactMode ? 3 : 3.4}px`}
   >
     <div class="week-header">
