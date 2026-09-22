@@ -10,6 +10,7 @@
   export let currentWeek: number | null | undefined = null;
   export let termName: string | null | undefined = null;
   export let preferences: SchedulePreferences;
+  export let colorfulCourses = false;
 
   const dispatch = createEventDispatcher<{ changed: void }>();
   let allCourses: Course[] = courses;
@@ -195,6 +196,7 @@
       showTopbar={false}
       {addRequest}
       {preferences}
+      {colorfulCourses}
       on:changed={coreChanged}
     />
   </div>
