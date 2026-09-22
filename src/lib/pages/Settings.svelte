@@ -31,6 +31,7 @@
 
   export let glass: GlassSettings;
   export let preferences: SchedulePreferences;
+  export let colorfulCourses = false;
   const dispatch = createEventDispatcher<{ changed: void }>();
 
   type NumericGlassKey = Exclude<keyof GlassSettings, 'motion'>;
@@ -135,6 +136,11 @@
   function updateGlass(key: NumericGlassKey, value: number) {
     glass = { ...glass, [key]: value };
     queueGlassSave();
+  }
+
+  function toggleColorfulCourses() {
+    colorfulCourses = !colorfulCourses;
+    localStorage.setItem('luma.colorfulCourses', String(colorfulCourses));
   }
 
   function toggleMotion() {
@@ -436,7 +442,8 @@
     {:else if activeSection === 'appearance'}
       <div class="settings-section-stack">
         <article class="settings-card glass-panel">
-          <div class="settings-title"><span><Palette size={19}/></span><div><b>Liquid Glass</b><p>实时调整模糊、透明度、高光与折射感。</p></div></div>
+          <div class="settings-title"><span><Palette size={19}/></span><div><b>外观与材质</b><p>默认采用克制的低饱和课表；需要时可开启多彩课程卡。</p></div></div>
+          <button class="toggle-row" on:click={toggleColorfulCourses}><span><b>多彩课程卡</b><small>{colorfulCourses?'已按课程显示多种柔和配色':'统一使用低饱和课程卡，减少视觉干扰'}</small></span><i class:on={colorfulCourses}></i></button>
           <div class="glass-preview-stage"><i class="preview-orb preview-orb-a"></i><i class="preview-orb preview-orb-b"></i><div class="glass-preview-card glass-panel refract"><span>实时预览</span><b>Liquid Glass</b><small>保持轻量 CSS 合成，不引入大型渲染依赖。</small></div></div>
           <div class="sliders">
             <label><span>模糊 <b>{glass.blur}px</b></span><input type="range" min="0" max="48" value={glass.blur} on:input={(e)=>updateGlass('blur',Number(e.currentTarget.value))}/></label>
