@@ -1,0 +1,220 @@
+/*
+ * Restrained timetable polish.
+ *
+ * The default week view deliberately avoids "every surface is glass" and keeps
+ * course cards in one quiet family. Users who prefer quick visual grouping can
+ * turn on Settings -> Appearance -> Colorful course cards.
+ */
+@media (max-width: 760px) {
+  .app-shell {
+    background:
+      linear-gradient(180deg, #f7f8fb 0%, #f4f5f8 52%, #f7f7f9 100%) !important;
+  }
+
+  .ambient-a,
+  .ambient-b {
+    opacity: .16 !important;
+  }
+
+  .mobile-nav {
+    left: 14px !important;
+    right: 14px !important;
+    bottom: calc(9px + env(safe-area-inset-bottom)) !important;
+    height: 58px !important;
+    min-height: 58px !important;
+    padding: 3px 5px !important;
+    border-radius: 20px !important;
+    background: rgba(250, 250, 252, .90) !important;
+    border: 1px solid rgba(60, 60, 67, .075) !important;
+    box-shadow: 0 8px 24px rgba(40, 42, 54, .08) !important;
+    -webkit-backdrop-filter: blur(18px) saturate(125%) !important;
+    backdrop-filter: blur(18px) saturate(125%) !important;
+  }
+
+  .mobile-nav::before { display: none !important; }
+
+  .mobile-nav button {
+    border-radius: 15px !important;
+    gap: 2px !important;
+    color: rgba(60, 60, 67, .56) !important;
+  }
+
+  .mobile-nav button.active {
+    color: #5550b8 !important;
+    background: rgba(91, 86, 214, .075) !important;
+    box-shadow: none !important;
+  }
+
+  .page-week.week-shell {
+    gap: 7px !important;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .page-week .week-toolbar {
+    min-height: 46px !important;
+    padding: 3px 4px !important;
+    border-radius: 14px !important;
+    background: rgba(252, 252, 253, .94) !important;
+    border: 1px solid rgba(60, 60, 67, .07) !important;
+    box-shadow: 0 3px 12px rgba(40, 42, 54, .045) !important;
+    -webkit-backdrop-filter: blur(14px) saturate(120%) !important;
+    backdrop-filter: blur(14px) saturate(120%) !important;
+  }
+
+  .page-week .week-toolbar .week-selector {
+    background: transparent !important;
+  }
+
+  .page-week .week-toolbar .week-title b {
+    color: rgba(28, 28, 30, .92) !important;
+  }
+
+  .page-week .week-toolbar .week-title em,
+  .page-week .week-toolbar .current-week,
+  .page-week .week-toolbar .week-add-button {
+    background: rgba(91, 86, 214, .07) !important;
+    color: #5751b9 !important;
+    box-shadow: none !important;
+  }
+
+  .page-week .week-board {
+    border-radius: 16px !important;
+    border: 1px solid rgba(60, 60, 67, .065) !important;
+    background: #fbfbfc !important;
+    box-shadow: 0 3px 14px rgba(45, 47, 58, .035) !important;
+  }
+
+  .page-week .week-board .week-header {
+    flex-basis: 48px !important;
+    height: 48px !important;
+    border-radius: 15px 15px 0 0 !important;
+    background: #f8f8fa !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+    box-shadow: inset 0 -1px rgba(60, 60, 67, .07) !important;
+  }
+
+  .page-week .week-board .week-header > div + div {
+    border-left-color: rgba(60, 60, 67, .025) !important;
+  }
+
+  .page-week .week-board .week-header .today {
+    color: #514bc2 !important;
+    background: rgba(91, 86, 214, .055) !important;
+  }
+
+  .page-week .week-time-grid {
+    background: #fbfbfc !important;
+  }
+
+  .page-week .time-guide,
+  .page-week .time-guide.major {
+    border-top-color: rgba(60, 60, 67, .06) !important;
+  }
+
+  .page-week .week-time-grid .week-course,
+  .page-week .week-time-grid .week-course.cyan,
+  .page-week .week-time-grid .week-course.amber,
+  .page-week .week-time-grid .week-course.blue,
+  .page-week .week-time-grid .week-course.green,
+  .page-week .week-time-grid .week-course.pink,
+  .page-week .week-time-grid .week-course.orange {
+    background: #ececf4 !important;
+    border: 1px solid rgba(82, 78, 130, .075) !important;
+    border-radius: 9px !important;
+    box-shadow: none !important;
+    color: rgba(28, 28, 30, .92) !important;
+  }
+
+  .page-week .week-time-grid .week-course b {
+    color: rgba(28, 28, 30, .92) !important;
+    font-weight: 760 !important;
+  }
+
+  .page-week .week-board:not(.compact) .week-course span,
+  .page-week .week-board:not(.compact) .week-course > span:first-of-type:not(:only-of-type),
+  .page-week .week-board:not(.compact) .week-course > span + span,
+  .page-week .week-board:not(.compact) .week-course .course-credit {
+    color: rgba(60, 60, 67, .60) !important;
+  }
+
+  .page-week .week-board:not(.compact) .week-course .course-credit {
+    font-weight: 650 !important;
+  }
+
+  /* Optional palette: solid, low-saturation colors rather than candy gradients. */
+  .page-week .week-board.colorful-courses .week-course {
+    background: #e8e6f7 !important;
+    border-color: rgba(91, 86, 160, .09) !important;
+  }
+
+  .page-week .week-board.colorful-courses .week-course.cyan {
+    background: #dff1f2 !important;
+    border-color: rgba(48, 126, 132, .09) !important;
+  }
+
+  .page-week .week-board.colorful-courses .week-course.amber {
+    background: #f5ecd7 !important;
+    border-color: rgba(152, 119, 56, .09) !important;
+  }
+
+  .page-week .week-board.colorful-courses .week-course.blue {
+    background: #e0ebf6 !important;
+    border-color: rgba(59, 105, 150, .09) !important;
+  }
+
+  .page-week .week-board.colorful-courses .week-course.green {
+    background: #e1eee5 !important;
+    border-color: rgba(59, 121, 76, .09) !important;
+  }
+
+  .page-week .week-board.colorful-courses .week-course.pink {
+    background: #f3e2ea !important;
+    border-color: rgba(142, 76, 107, .09) !important;
+  }
+
+  .page-week .week-board.colorful-courses .week-course.orange {
+    background: #f3e5dc !important;
+    border-color: rgba(145, 91, 57, .09) !important;
+  }
+
+  .page-week .week-empty {
+    background: #f7f7f9 !important;
+    border-color: rgba(60, 60, 67, .06) !important;
+    box-shadow: none !important;
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
+
+@media (prefers-color-scheme: dark) and (max-width: 760px) {
+  .page-week .week-board,
+  .page-week .week-time-grid {
+    background: #17171a !important;
+    border-color: rgba(255, 255, 255, .07) !important;
+  }
+
+  .page-week .week-board .week-header {
+    background: #1d1d21 !important;
+    box-shadow: inset 0 -1px rgba(255, 255, 255, .06) !important;
+  }
+
+  .page-week .week-time-grid .week-course,
+  .page-week .week-time-grid .week-course.cyan,
+  .page-week .week-time-grid .week-course.amber,
+  .page-week .week-time-grid .week-course.blue,
+  .page-week .week-time-grid .week-course.green,
+  .page-week .week-time-grid .week-course.pink,
+  .page-week .week-time-grid .week-course.orange {
+    background: #2b2b34 !important;
+    border-color: rgba(255,255,255,.055) !important;
+  }
+
+  .page-week .week-board.colorful-courses .week-course { background: #353248 !important; }
+  .page-week .week-board.colorful-courses .week-course.cyan { background: #253d40 !important; }
+  .page-week .week-board.colorful-courses .week-course.amber { background: #413926 !important; }
+  .page-week .week-board.colorful-courses .week-course.blue { background: #29394a !important; }
+  .page-week .week-board.colorful-courses .week-course.green { background: #293c31 !important; }
+  .page-week .week-board.colorful-courses .week-course.pink { background: #432f39 !important; }
+  .page-week .week-board.colorful-courses .week-course.orange { background: #44342b !important; }
+}
