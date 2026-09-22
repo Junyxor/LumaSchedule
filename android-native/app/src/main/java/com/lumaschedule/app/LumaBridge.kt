@@ -589,11 +589,22 @@ class LumaBridge(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val manager = activity.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        if (activity.canScheduleExactAlarms()) {
-            manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-        } else {
+        val scheduled = runCatching {
+            if (activity.canScheduleExactAlarms()) {
+                manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+            } else {
+                manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
+            }
+        }.recoverCatching {
             manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-        }
+        }.isSuccess
+        if (!scheduled) return false
+        DiagnosticLog.record(
+            activity.applicationContext,
+            "INFO",
+            "reminders.test_scheduled",
+            "id=" + id + " triggerAt=" + triggerAt + " exact=" + activity.canScheduleExactAlarms()
+        )
         val stored = JSONObject()
             .put("id", id)
             .put("triggerAtEpochMs", triggerAt)
