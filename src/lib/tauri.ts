@@ -4,6 +4,7 @@ import type {
   Course,
   CourseMutation,
   CourseReminderSettings,
+  ExactAlarmStatus,
   GlassSettings,
   GradeImportBundle,
   GradeImportResult,
@@ -156,6 +157,14 @@ export async function ensureNotificationPermission() {
 
 export async function testNotification() {
   return unwrap(await invokeNative<{ value: boolean }>('test_notification'));
+}
+
+export function getExactAlarmStatus() {
+  return invokeNative<ExactAlarmStatus>('get_exact_alarm_status');
+}
+
+export async function requestExactAlarmAccess() {
+  return unwrap(await invokeNative<{ value: boolean }>('request_exact_alarm_access'));
 }
 
 export function getCourseReminderSettings() {
