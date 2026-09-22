@@ -211,11 +211,13 @@ class MainActivity : Activity() {
     fun requestExactAlarmAccess(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || canScheduleExactAlarms()) return true
         return runCatching {
-            startActivity(
-                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
-                    data = Uri.parse("package:$packageName")
-                }
-            )
+            runOnUiThread {
+                startActivity(
+                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                )
+            }
             true
         }.getOrDefault(false)
     }
