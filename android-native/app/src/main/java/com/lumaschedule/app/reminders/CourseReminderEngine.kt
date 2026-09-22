@@ -150,10 +150,20 @@ class CourseReminderEngine(private val context: Context) {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        if (canScheduleExactAlarms()) {
-            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAt, pending)
-        } else {
+        val exact = canScheduleExactAlarms()
+        val scheduled = runCatching {
+            if (exact) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAt, pending)
+            } else {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAt, pending)
+            }
+        }.recoverCatching {
+            // Permission state can change between the capability check and scheduling.
             alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAt, pending)
+        }.isSuccess
+        if (!scheduled) {
+            DiagnosticLog.record(context, "WARN", "reminders.schedule_failed", "id=" + reminder.id)
+            return false
         }
         val stored = JSONObject()
             .put("id", reminder.id)
