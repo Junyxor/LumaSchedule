@@ -19,3 +19,4 @@ html, body, #app, .app-shell {
 }
 
 @import './styles/week-polish.css';
+@import './styles/week-minimal.css';
