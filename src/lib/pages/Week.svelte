@@ -136,7 +136,7 @@
 </script>
 
 <section class="page page-week week-shell">
-  <div class="week-toolbar glass-panel" aria-label="教学周导航">
+  <div class="week-toolbar" aria-label="教学周导航">
     <button
       class="week-arrow"
       on:click={() => selectWeek(selectedWeek - 1)}
