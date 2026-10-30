@@ -247,6 +247,16 @@
     return `${text} 学分`;
   }
 
+  function courseTimeLabel(course: Course) {
+    const start = parseClock(course.start);
+    const end = parseClock(course.end);
+    if (start !== null && end !== null) return `${formatClock(start)}–${formatClock(end)}`;
+    if (start !== null) return `${formatClock(start)} 开始`;
+    const from = Math.max(1, course.startSection || 1);
+    const to = Math.max(from, course.endSection || from);
+    return from === to ? `第${from}节` : `第${from}–${to}节`;
+  }
+
   function newCourse() {
     draft = blankDraft();
     weeksText = `1-${preferences.weekCount || 20}`;
@@ -450,6 +460,7 @@
             on:click={() => editCourse(course)}
           >
             <b>{course.name}</b>
+            {#if preferences.showTime}<span class="course-time">{courseTimeLabel(course)}</span>{/if}
             {#if preferences.showTeacher && course.teacher}<span>{course.teacher}</span>{/if}
             {#if preferences.showRoom && course.room}<span>{course.room}</span>{/if}
             {#if creditLabel(course.credit)}<small class="course-credit">{creditLabel(course.credit)}</small>{/if}
@@ -723,6 +734,17 @@
     line-height: 1.12;
     font-weight: 540;
     color: rgba(36, 35, 43, .78);
+  }
+
+  .week-course .course-time {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 8.6px;
+    line-height: 1.08;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+    color: rgba(36, 35, 43, .64);
   }
 
   .week-course .course-credit {
