@@ -30,7 +30,15 @@ import type {
 } from '../types';
 import { invoke, unwrap } from './bridge';
 
-const LONG = 300_000;
+/*
+ * JS deadlines must outlast the native waits so Kotlin always answers first;
+ * otherwise a late success arrives after the UI already reported a timeout.
+ * Native waits (MainActivity): document picker 10 min, notification permission 60 s.
+ */
+/** Picker-backed commands: picker wait plus, for restores, the permission wait. */
+const PICKER = 720_000;
+/** Commands that may show the notification permission dialog. */
+const PERMISSION = 90_000;
 
 export const api = {
   bootstrap: () => invoke<Bootstrap>('get_bootstrap'),
@@ -68,10 +76,10 @@ export const api = {
   saveReminderSettings: (settings: ReminderSettings) => invoke<ReminderSettings>('save_reminder_settings', { settings }),
   syncReminders: () => invoke<ReminderSyncReport>('sync_reminders', {}, 120_000),
   requestNotificationPermission: async () =>
-    unwrap(await invoke<{ value: boolean }>('request_notification_permission', {}, 60_000)),
-  testNotification: async () => unwrap(await invoke<{ value: boolean }>('test_notification', {}, 60_000)),
+    unwrap(await invoke<{ value: boolean }>('request_notification_permission', {}, PERMISSION)),
+  testNotification: async () => unwrap(await invoke<{ value: boolean }>('test_notification', {}, PERMISSION)),
   scheduleTestReminder: async (delayMs = 60_000) =>
-    unwrap(await invoke<{ value: boolean }>('schedule_test_reminder', { delayMs }, 60_000)),
+    unwrap(await invoke<{ value: boolean }>('schedule_test_reminder', { delayMs }, PERMISSION)),
   exactAlarmStatus: () => invoke<ExactAlarmStatus>('get_exact_alarm_status'),
   requestExactAlarmAccess: async () => unwrap(await invoke<{ value: boolean }>('request_exact_alarm_access')),
   refreshWidgets: () => invoke<void>('refresh_widgets'),
@@ -91,18 +99,19 @@ export const api = {
   closeSession: (sessionId: string) => invoke<void>('shiguang_close_session', { sessionId }),
 
   // Files
-  exportScheduleJson: () => invoke<boolean>('export_schedule_json', {}, LONG),
-  exportScheduleIcs: () => invoke<boolean>('export_schedule_ics', {}, LONG),
-  exportFullBackup: () => invoke<boolean>('export_full_backup', {}, LONG),
-  exportDiagnostics: () => invoke<boolean>('export_diagnostics', {}, LONG),
-  restoreFullBackup: () => invoke<BackupSummary | null>('restore_full_backup', {}, LONG),
+  exportScheduleJson: () => invoke<boolean>('export_schedule_json', {}, PICKER),
+  exportScheduleIcs: () => invoke<boolean>('export_schedule_ics', {}, PICKER),
+  exportFullBackup: () => invoke<boolean>('export_full_backup', {}, PICKER),
+  exportDiagnostics: () => invoke<boolean>('export_diagnostics', {}, PICKER),
+  restoreFullBackup: () => invoke<BackupSummary | null>('restore_full_backup', {}, PICKER),
 
   // WebDAV
   webDavProfile: () => invoke<WebDavProfile>('get_webdav_profile'),
   saveWebDavProfile: (profile: WebDavProfile) => invoke<void>('save_webdav_profile', { profile }),
   webDavTest: (credentials: WebDavCredentials) => invoke<WebDavResult>('webdav_test', { credentials }, 60_000),
   webDavUpload: (credentials: WebDavCredentials) => invoke<WebDavResult>('webdav_upload', { credentials }, 120_000),
-  webDavRestore: (credentials: WebDavCredentials) => invoke<WebDavResult>('webdav_restore', { credentials }, 120_000)
+  // Download plus restore plus, when the backup turns reminders on, the permission wait.
+  webDavRestore: (credentials: WebDavCredentials) => invoke<WebDavResult>('webdav_restore', { credentials }, 240_000)
 };
 
 // ---------------------------------------------------------------------------

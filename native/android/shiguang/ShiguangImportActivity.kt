@@ -562,6 +562,17 @@ $adapterScript
 
     override fun onDestroy() {
         cancelPendingInject()
+        // Finished without going through back/complete/error (task reset, another Activity
+        // clearing the stack): end the session so the app stops waiting for this login.
+        if (isFinishing && ::sessionId.isInitialized && sessionId.isNotBlank()) {
+            val status = currentStatus()
+            if (status == "running" || status == "collecting") {
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putString(key(sessionId, "status"), "error")
+                    .putString(key(sessionId, "message"), "登录窗口已关闭；本次没有导入数据。")
+                    .apply()
+            }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             backInvokedCallback?.let { callback ->
                 runCatching { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback) }

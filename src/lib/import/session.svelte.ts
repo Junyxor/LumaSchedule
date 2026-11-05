@@ -104,7 +104,9 @@ class SessionManager {
       if (state.status === 'error') {
         this.#stop();
         await api.closeSession(session.sessionId).catch(() => undefined);
-        toast.show(state.message || '导入已取消。', state.message?.includes('退出') ? 'info' : 'error');
+        // Leaving or closing the login window is the user's choice, not a failure.
+        const userEnded = /已退出教务登录|登录窗口已关闭/.test(state.message ?? '');
+        toast.show(state.message || '导入已取消。', userEnded ? 'info' : 'error');
         return;
       }
       this.#schedule(900);

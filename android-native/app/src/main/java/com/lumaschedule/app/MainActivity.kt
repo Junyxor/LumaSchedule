@@ -4,10 +4,12 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlarmManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.Insets
 import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Build
@@ -36,6 +38,7 @@ import java.io.ByteArrayInputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 
 class MainActivity : Activity() {
     private lateinit var container: FrameLayout
@@ -54,6 +57,15 @@ class MainActivity : Activity() {
 
     /** System bar insets in CSS pixels; the bottom inset is 0 while the keyboard is open. */
     @Volatile private var cssInsets = IntArray(4) // top, right, bottom, left
+
+    /**
+     * WebView text zoom from the system font size, capped so layouts keep their shape.
+     * fontScale is not in configChanges, so a font size change recreates the Activity.
+     */
+    private val textZoomPercent by lazy {
+        (resources.configuration.fontScale * 100).roundToInt().coerceIn(MIN_TEXT_ZOOM, MAX_TEXT_ZOOM)
+    }
+
     @Volatile private var webBackEnabled = false
     private var backCallback: Any? = null
     private var darkBars = false
@@ -70,10 +82,7 @@ class MainActivity : Activity() {
         container = FrameLayout(this)
         webView = WebView(this)
         container.addView(webView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
-        container.setOnApplyWindowInsetsListener { _, insets ->
-            applyInsets(insets)
-            insets
-        }
+        container.setOnApplyWindowInsetsListener { _, insets -> applyInsets(insets) }
         setContentView(container)
         configureWebView(webView)
         bridge = LumaBridge(this, webView, ioExecutor, launchStarted)
@@ -122,8 +131,14 @@ class MainActivity : Activity() {
         }
     }
 
+    /**
+     * Pads the container above the keyboard and publishes the system-bar insets as
+     * CSS variables. Returns what the WebView itself sees: the keyboard and, while it
+     * is open, the bottom bar are already covered by the padding, so they are removed
+     * and `env(safe-area-inset-*)` cannot count them a second time.
+     */
     @Suppress("DEPRECATION")
-    private fun applyInsets(insets: WindowInsets) {
+    private fun applyInsets(insets: WindowInsets): WindowInsets {
         val density = resources.displayMetrics.density
         val top: Int
         val left: Int
@@ -154,6 +169,21 @@ class MainActivity : Activity() {
             (left / density).toInt()
         )
         pushInsets()
+        return insetsForWebView(insets, keyboardOpen)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun insetsForWebView(insets: WindowInsets, keyboardOpen: Boolean): WindowInsets {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val builder = WindowInsets.Builder(insets).setInsets(WindowInsets.Type.ime(), Insets.NONE)
+            if (keyboardOpen) {
+                val nav = insets.getInsets(WindowInsets.Type.navigationBars())
+                builder.setInsets(WindowInsets.Type.navigationBars(), Insets.of(nav.left, nav.top, nav.right, 0))
+            }
+            return builder.build()
+        }
+        if (!keyboardOpen) return insets
+        return insets.replaceSystemWindowInsets(insets.systemWindowInsetLeft, insets.systemWindowInsetTop, insets.systemWindowInsetRight, 0)
     }
 
     fun insetsJson(): String = JSONObject()
@@ -161,6 +191,7 @@ class MainActivity : Activity() {
         .put("right", cssInsets[1])
         .put("bottom", cssInsets[2])
         .put("left", cssInsets[3])
+        .put("textZoom", textZoomPercent)
         .toString()
 
     private fun pushInsets() {
@@ -168,7 +199,8 @@ class MainActivity : Activity() {
         val (top, right, bottom, left) = cssInsets.toList()
         webView.evaluateJavascript(
             "(function(s){s.setProperty('--native-inset-top','${top}px');s.setProperty('--native-inset-right','${right}px');" +
-                "s.setProperty('--native-inset-bottom','${bottom}px');s.setProperty('--native-inset-left','${left}px');})(document.documentElement.style);",
+                "s.setProperty('--native-inset-bottom','${bottom}px');s.setProperty('--native-inset-left','${left}px');" +
+                "s.setProperty('--text-zoom','${textZoomPercent / 100.0}');})(document.documentElement.style);",
             null
         )
     }
@@ -246,7 +278,8 @@ class MainActivity : Activity() {
             setSupportZoom(false)
             builtInZoomControls = false
             displayZoomControls = false
-            textZoom = 100
+            // Follow the system font size (capped); the CSS also receives it as --text-zoom.
+            textZoom = textZoomPercent
             javaScriptCanOpenWindowsAutomatically = false
             mediaPlaybackRequiresUserGesture = true
             cacheMode = WebSettings.LOAD_DEFAULT
@@ -452,8 +485,20 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        /**
+         * Opens the app the way the launcher icon does: an existing task comes to the
+         * front unchanged, so a 教务 login in progress stays on top instead of being
+         * finished by CLEAR_TOP. Used by reminder notifications and the widget.
+         */
+        fun launcherIntent(context: Context): Intent = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+            .setClass(context, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+
         private const val APP_HOST = "app.luma.local"
         private const val APP_URL = "https://$APP_HOST/index.html"
+        private const val MIN_TEXT_ZOOM = 85
+        private const val MAX_TEXT_ZOOM = 130
         private const val REQUEST_NOTIFICATIONS = 4017
         private const val REQUEST_DOCUMENT = 4018
         private const val REQUEST_WEB_FILE = 4019

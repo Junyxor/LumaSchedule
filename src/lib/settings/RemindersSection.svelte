@@ -120,10 +120,10 @@
     <CalendarX2 size={18} />
     <span><b>需要开学日期。</b>设置后才能知道每节课具体在哪一天，点这里去设置。</span>
   </button>
-{:else if settings.enabled && (report?.untimedCount ?? 0) > 0}
+{:else if settings.enabled && app.estimatedCount > 0}
   <button class="notice warning action" type="button" onclick={() => app.openSettings('times')}>
     <Clock3 size={18} />
-    <span><b>{report?.untimedCount} 个上课时段没有具体时间，</b>不会提醒。在「作息时间」里填好每节课的时间即可。</span>
+    <span><b>{app.estimatedCount} 个上课时段没有具体时间，</b>提醒会按常见作息估算的时间发出。在「作息时间」里填好每节课的时间即可。</span>
   </button>
 {/if}
 

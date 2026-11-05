@@ -158,12 +158,48 @@ export function minutesOfDay(date: Date) {
   return date.getHours() * 60 + date.getMinutes();
 }
 
+const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * The wall-clock time in `timeZone` at `instant` (default: now), as a Date whose
+ * local fields (getHours, getDate, …) read that wall clock. Every helper here works
+ * on local fields, so this keeps "today", the teaching week and the current-time
+ * line in the term's zone, which is what reminders and the widget use.
+ */
+export function wallClock(timeZone: string, instant = new Date()): Date {
+  try {
+    let format = zoneFormatters.get(timeZone);
+    if (!format) {
+      format = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        hourCycle: 'h23',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        second: 'numeric'
+      });
+      zoneFormatters.set(timeZone, format);
+    }
+    const parts: Record<string, number> = {};
+    for (const part of format.formatToParts(instant)) if (part.type !== 'literal') parts[part.type] = Number(part.value);
+    const date = new Date(parts.year, parts.month - 1, parts.day, parts.hour % 24, parts.minute, parts.second, instant.getMilliseconds());
+    return Number.isNaN(date.getTime()) ? instant : date;
+  } catch {
+    // Unknown zone: fall back to the device clock.
+    return instant;
+  }
+}
+
 export interface SectionTime {
   section: number;
   start: number;
   end: number;
   /** True when the time comes from the saved timetable instead of being inferred. */
   saved: boolean;
+  /** True when start or end falls back to the built-in typical day (neither saved nor used by any course). */
+  estimated: boolean;
 }
 
 const DEFAULT_SLOTS: Array<[string, string]> = [
@@ -195,6 +231,8 @@ export function sectionCountFor(semester: Semester, defaultSections: number) {
 /**
  * Start/end minute of every section: saved time slots first, then the most common
  * explicit time used by imported courses, then a typical Chinese university day.
+ * `ScheduleMath.TimeResolver` in Kotlin applies the same rule, so reminders, the
+ * widget and ICS export use the times shown here.
  */
 export function buildSectionTimes(semester: Semester, count: number): SectionTime[] {
   const slots = new Map(semester.timeSlots.map((slot) => [slot.section, slot]));
@@ -210,15 +248,36 @@ export function buildSectionTimes(semester: Semester, count: number): SectionTim
     let end =
       savedEnd ??
       mostCommon(semester.courses.filter((course) => course.endSection === section).map((course) => parseClock(course.endTime)));
+    let estimated = false;
     if (start === null) {
+      estimated = true;
       const fallback = DEFAULT_SLOTS[section - 1] ? parseClock(DEFAULT_SLOTS[section - 1][0]) : null;
       const afterPrevious = previous ? previous.end + 10 : 8 * 60;
       start = end !== null ? end - 45 : fallback !== null && fallback >= afterPrevious ? fallback : afterPrevious;
     }
-    if (end === null || end <= start) end = start + 45;
-    result.push({ section, start: clamp(start, 0, 24 * 60 - 1), end: clamp(end, 1, 24 * 60), saved: savedStart !== null && savedEnd !== null });
+    if (end === null || end <= start) {
+      estimated = true;
+      end = start + 45;
+    }
+    result.push({
+      section,
+      start: clamp(start, 0, 24 * 60 - 1),
+      end: clamp(end, 1, 24 * 60),
+      saved: savedStart !== null && savedEnd !== null,
+      estimated
+    });
   }
   return result;
+}
+
+/** True when the course's start or end time is a typical-day estimate rather than a known time. */
+export function courseTimeEstimated(course: Course, sections: SectionTime[]) {
+  const first = Math.max(1, course.startSection || 1);
+  const last = Math.max(first, course.endSection || first);
+  return (
+    (parseClock(course.startTime) === null && sections[first - 1]?.estimated !== false) ||
+    (parseClock(course.endTime) === null && sections[last - 1]?.estimated !== false)
+  );
 }
 
 export interface TimeRange {

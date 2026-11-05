@@ -1,5 +1,18 @@
 import type { ImportBundle, ImportedCourse } from '../types';
-import { addDays, atNoon, daysBetween, formatClock, normalizeClock, parseClock, parseIsoDate, parseWeeksText, startOfWeek, toIsoDate, weekdayOf } from '../schedule/calendar';
+import {
+  addDays,
+  atNoon,
+  daysBetween,
+  formatClock,
+  normalizeClock,
+  parseClock,
+  parseIsoDate,
+  parseWeeksText,
+  startOfWeek,
+  toIsoDate,
+  wallClock,
+  weekdayOf
+} from '../schedule/calendar';
 
 export type ImportFormat = 'json' | 'wakeup' | 'csv' | 'tsv' | 'ics' | 'cses';
 
@@ -452,13 +465,31 @@ function unescapeIcs(value: string) {
   return value.replace(/\\n/gi, '\n').replace(/\\([,;\\])/g, '$1').trim();
 }
 
-function parseIcsDateTime(value: string, params: Record<string, string>): Date | null {
+/**
+ * Local wall-clock Date for a DATE-TIME value. UTC values are moved into the
+ * calendar's own zone (X-WR-TIMEZONE) when it has one, so a file exported in
+ * Asia/Shanghai keeps its class times on a phone set to another zone.
+ */
+function parseIcsDateTime(value: string, params: Record<string, string>, zone = ''): Date | null {
   if (params.VALUE === 'DATE') return null;
   const match = value.trim().match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})?(Z)?$/);
   if (!match) return null;
   const [, y, mo, d, h, mi, s, utc] = match;
   const parts = [Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s ?? 0)] as const;
-  return utc ? new Date(Date.UTC(...parts)) : new Date(...parts);
+  if (!utc) return new Date(...parts);
+  const instant = new Date(Date.UTC(...parts));
+  return zone ? wallClock(zone, instant) : instant;
+}
+
+function validTimeZone(raw: string) {
+  const zone = raw.trim();
+  if (!zone) return '';
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    return zone;
+  } catch {
+    return '';
+  }
 }
 
 function parseIcsDuration(value: string) {
@@ -470,7 +501,7 @@ function parseIcsDuration(value: string) {
 
 const BYDAY: Record<string, number> = { MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6, SU: 7 };
 
-function expandRule(start: Date, rule: string): Date[] {
+function expandRule(start: Date, rule: string, zone: string): Date[] {
   const options = Object.fromEntries(
     rule.split(';').map((part) => {
       const [key, value = ''] = part.split('=');
@@ -479,7 +510,7 @@ function expandRule(start: Date, rule: string): Date[] {
   );
   const interval = Math.max(1, Number(options.INTERVAL) || 1);
   const count = options.COUNT ? Math.min(500, Number(options.COUNT)) : Number.POSITIVE_INFINITY;
-  const untilValue = options.UNTIL ? parseIcsDateTime(options.UNTIL.length === 8 ? `${options.UNTIL}T235959` : options.UNTIL, {}) : null;
+  const untilValue = options.UNTIL ? parseIcsDateTime(options.UNTIL.length === 8 ? `${options.UNTIL}T235959` : options.UNTIL, {}, zone) : null;
   const until = untilValue ?? new Date(start.getTime() + 64 * 7 * 86_400_000);
   const result: Date[] = [];
   if (options.FREQ === 'WEEKLY') {
@@ -514,6 +545,11 @@ function parseIcs(payload: string): ImportBundle {
   const events: IcsEvent[] = [];
   let current: IcsEvent | null = null;
   let calendarName = '';
+  let zone = '';
+  // Written by LumaSchedule's own ICS export so the teaching weeks survive a round trip.
+  let markedTermStart: Date | null = null;
+  let markedWeekStart: 1 | 7 | null = null;
+  let markedWeekCount: number | null = null;
   for (const line of lines) {
     if (/^BEGIN:VEVENT$/i.test(line.trim())) {
       current = new Map();
@@ -527,7 +563,15 @@ function parseIcs(payload: string): ImportBundle {
     const property = parseIcsProperty(line);
     if (!property) continue;
     if (!current) {
+      const value = property.value.trim();
       if (property.name === 'X-WR-CALNAME') calendarName = unescapeIcs(property.value);
+      else if (property.name === 'X-WR-TIMEZONE') zone = validTimeZone(value);
+      else if (property.name === 'X-LUMA-TERM-START') markedTermStart = parseIsoDate(value);
+      else if (property.name === 'X-LUMA-WEEK-START') markedWeekStart = value === '7' ? 7 : value === '1' ? 1 : null;
+      else if (property.name === 'X-LUMA-WEEK-COUNT') {
+        const weeks = Number(value);
+        markedWeekCount = Number.isInteger(weeks) && weeks >= 1 && weeks <= 64 ? weeks : null;
+      }
       continue;
     }
     current.set(property.name, [...(current.get(property.name) ?? []), property]);
@@ -539,19 +583,22 @@ function parseIcs(payload: string): ImportBundle {
     const first = (name: string) => event.get(name)?.[0];
     if (first('STATUS')?.value.toUpperCase() === 'CANCELLED' || first('RECURRENCE-ID')) continue;
     const dtStart = first('DTSTART');
-    const start = dtStart ? parseIcsDateTime(dtStart.value, dtStart.params) : null;
+    const start = dtStart ? parseIcsDateTime(dtStart.value, dtStart.params, zone) : null;
     if (!start) continue;
     const dtEnd = first('DTEND');
     const durationMs = dtEnd
-      ? (parseIcsDateTime(dtEnd.value, dtEnd.params)?.getTime() ?? start.getTime()) - start.getTime()
+      ? (parseIcsDateTime(dtEnd.value, dtEnd.params, zone)?.getTime() ?? start.getTime()) - start.getTime()
       : parseIcsDuration(first('DURATION')?.value ?? '');
     const excluded = new Set(
       (event.get('EXDATE') ?? []).flatMap((property) =>
-        property.value.split(',').map((value) => parseIcsDateTime(value, property.params)?.getTime()).filter((value): value is number => value !== undefined)
+        property.value
+          .split(',')
+          .map((value) => parseIcsDateTime(value, property.params, zone)?.getTime())
+          .filter((value): value is number => value !== undefined)
       )
     );
     const rule = first('RRULE')?.value;
-    const occurrences = (rule ? expandRule(start, rule) : [start]).filter((date) => !excluded.has(date.getTime()));
+    const occurrences = (rule ? expandRule(start, rule, zone) : [start]).filter((date) => !excluded.has(date.getTime()));
     const description = unescapeIcs(first('DESCRIPTION')?.value ?? '');
     const teacher = description.match(/(?:教师|老师|任课教师|teacher)\s*[：:]\s*([^\n·;；,，]+)/i)?.[1]?.trim() ?? '';
     for (const date of occurrences) {
@@ -569,10 +616,13 @@ function parseIcs(payload: string): ImportBundle {
   if (!items.length) throw new Error('ICS 中没有可识别的上课时间。');
 
   const earliest = items.reduce((min, item) => (item.date < min ? item.date : min), items[0].date);
-  const termStart = startOfWeek(earliest, 1);
+  // Other calendars carry no week rule: assume Monday-first weeks starting with the first event.
+  const weekStartsOn = markedWeekStart ?? 1;
+  const termStart = markedTermStart ?? startOfWeek(earliest, weekStartsOn);
+  const weekBase = startOfWeek(termStart, weekStartsOn);
   const groups = new Map<string, { item: Item; weeks: Set<number> }>();
   for (const item of items) {
-    const week = Math.floor(daysBetween(termStart, atNoon(item.date)) / 7) + 1;
+    const week = Math.floor(daysBetween(weekBase, atNoon(item.date)) / 7) + 1;
     if (week < 1 || week > 64) continue;
     const key = [item.name, item.location, item.teacher, weekdayOf(item.date), item.start, item.end].join('\u001f');
     const group = groups.get(key) ?? { item, weeks: new Set<number>() };
@@ -594,7 +644,14 @@ function parseIcs(payload: string): ImportBundle {
     termName: calendarName || null,
     termStart: toIsoDate(termStart),
     courses,
-    metadata: {}
+    metadata: {
+      // The week numbers above were computed with this week start, so the schedule must use it too.
+      courseConfig: JSON.stringify({
+        firstDayOfWeek: weekStartsOn,
+        semesterStartDate: toIsoDate(termStart),
+        ...(markedWeekCount ? { semesterTotalWeeks: markedWeekCount } : {})
+      })
+    }
   };
 }
 

@@ -4,8 +4,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.temporal.ChronoUnit
+import java.util.Locale
 
 /**
  * Calendar rules shared by the database, reminders, the widget and ICS export.
@@ -136,28 +138,95 @@ object ScheduleMath {
         val weeksMask: Long
     )
 
-    data class TimeRange(val start: LocalTime, val end: LocalTime?)
+    /** Minutes after midnight, or null for a missing or invalid time. */
+    fun minuteOf(raw: String?): Int? = parseTime(raw)?.let { it.hour * 60 + it.minute }
+
+    /** 485 → "08:05"; clamped to the same day like `formatClock()` in calendar.ts. */
+    fun clock(minute: Int): String {
+        val safe = minute.coerceIn(0, MINUTES_PER_DAY - 1)
+        return String.format(Locale.ROOT, "%02d:%02d", safe / 60, safe % 60)
+    }
 
     /**
-     * Resolves clock times for meetings: explicit time → saved slot → the most
-     * common explicit time other meetings use for the same section. Meetings
-     * with no trustworthy time are left out instead of guessing.
+     * Clock time of one meeting in minutes after midnight. [estimated] is true when
+     * the time comes from the built-in typical day rather than the meeting, the saved
+     * timetable or other meetings in the same section.
+     */
+    data class TimeRange(val startMinute: Int, val endMinute: Int, val estimated: Boolean) {
+        fun startAt(date: LocalDate): LocalDateTime = date.atStartOfDay().plusMinutes(startMinute.toLong())
+        fun endAt(date: LocalDate): LocalDateTime = date.atStartOfDay().plusMinutes(endMinute.toLong())
+        val label: String get() = "${clock(startMinute)}–${clock(endMinute)}"
+    }
+
+    data class SectionTime(val section: Int, val start: Int, val end: Int, val estimated: Boolean)
+
+    /** Start of each section in a typical Chinese university day; mirrors `DEFAULT_SLOTS` in calendar.ts. */
+    private val DEFAULT_SECTION_STARTS = listOf(480, 535, 600, 655, 840, 895, 960, 1015, 1140, 1195, 1250, 1305)
+
+    /**
+     * Resolves meeting times with the same rule as `buildSectionTimes()` and
+     * `courseRange()` in calendar.ts, so reminders, the widget and ICS export use the
+     * times the app shows: explicit meeting time → saved time slot → the most common
+     * explicit time other meetings use for that section → a typical day (default
+     * start, 45-minute sections, at least 10 minutes after the previous section).
      */
     class TimeResolver(slots: List<Slot>, meetings: List<Meeting>) {
-        private val slotStart = slots.associate { it.section to parseTime(it.start) }
-        private val slotEnd = slots.associate { it.section to parseTime(it.end) }
-        private val inferredStart = mostCommon(meetings.mapNotNull { m -> parseTime(m.startTime)?.let { m.startSection to it } })
-        private val inferredEnd = mostCommon(meetings.mapNotNull { m -> parseTime(m.endTime)?.let { m.endSection to it } })
+        val sections: List<SectionTime> = buildSections(slots, meetings)
 
-        fun resolve(meeting: Meeting): TimeRange? {
-            val start = parseTime(meeting.startTime) ?: slotStart[meeting.startSection] ?: inferredStart[meeting.startSection] ?: return null
-            val last = maxOf(meeting.startSection, meeting.endSection)
-            val end = parseTime(meeting.endTime) ?: slotEnd[last] ?: inferredEnd[last]
-            return TimeRange(start, end?.takeIf { it.isAfter(start) })
+        fun resolve(meeting: Meeting): TimeRange {
+            val first = meeting.startSection.coerceAtLeast(1)
+            val last = maxOf(first, meeting.endSection)
+            val explicitStart = minuteOf(meeting.startTime)
+            val explicitEnd = minuteOf(meeting.endTime)
+            val firstSection = sections.getOrNull(first - 1)
+            val lastSection = sections.getOrNull(last - 1)
+            val start = explicitStart ?: firstSection?.start ?: (8 * 60 + (first - 1) * 55)
+            var end = explicitEnd ?: lastSection?.end ?: (start + 45 * (last - first + 1))
+            if (end <= start) end = start + 45
+            val estimated = (explicitStart == null && firstSection?.estimated != false) ||
+                (explicitEnd == null && lastSection?.estimated != false)
+            return TimeRange(start, minOf(end, MINUTES_PER_DAY), estimated)
         }
 
-        private fun mostCommon(pairs: List<Pair<Int, LocalTime>>): Map<Int, LocalTime> = pairs
+        private fun buildSections(slots: List<Slot>, meetings: List<Meeting>): List<SectionTime> {
+            val saved = slots.associateBy { it.section }
+            val inferredStart = mostCommon(meetings.mapNotNull { m -> minuteOf(m.startTime)?.let { m.startSection to it } })
+            val inferredEnd = mostCommon(meetings.mapNotNull { m -> minuteOf(m.endTime)?.let { m.endSection to it } })
+            val result = ArrayList<SectionTime>(MAX_SECTIONS)
+            for (section in 1..MAX_SECTIONS) {
+                val previous = result.lastOrNull()
+                val slot = saved[section]
+                var start = minuteOf(slot?.start) ?: inferredStart[section]
+                var end = minuteOf(slot?.end) ?: inferredEnd[section]
+                var estimated = false
+                if (start == null) {
+                    estimated = true
+                    val fallback = DEFAULT_SECTION_STARTS.getOrNull(section - 1)
+                    val afterPrevious = previous?.let { it.end + 10 } ?: (8 * 60)
+                    start = when {
+                        end != null -> end - 45
+                        fallback != null && fallback >= afterPrevious -> fallback
+                        else -> afterPrevious
+                    }
+                }
+                if (end == null || end <= start) {
+                    estimated = true
+                    end = start + 45
+                }
+                result += SectionTime(section, start.coerceIn(0, MINUTES_PER_DAY - 1), end.coerceIn(1, MINUTES_PER_DAY), estimated)
+            }
+            return result
+        }
+
+        /** Most frequent value per section; ties go to the earlier time, like `mostCommon()` in calendar.ts. */
+        private fun mostCommon(pairs: List<Pair<Int, Int>>): Map<Int, Int> = pairs
             .groupBy({ it.first }, { it.second })
-            .mapValues { (_, times) -> times.groupingBy { it }.eachCount().entries.sortedWith(compareByDescending<Map.Entry<LocalTime, Int>> { it.value }.thenBy { it.key }).first().key }
+            .mapValues { (_, values) ->
+                values.groupingBy { it }.eachCount().entries
+                    .sortedWith(compareByDescending<Map.Entry<Int, Int>> { it.value }.thenBy { it.key })
+                    .first().key
+            }
     }
+
+    private const val MINUTES_PER_DAY = 24 * 60
 }

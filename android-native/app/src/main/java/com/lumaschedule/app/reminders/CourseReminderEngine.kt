@@ -12,7 +12,6 @@ import com.lumaschedule.app.widgets.ReminderReceiver
 import org.json.JSONArray
 import org.json.JSONObject
 import java.time.Duration
-import java.time.LocalDateTime
 import java.time.ZonedDateTime
 
 /**
@@ -60,23 +59,21 @@ class CourseReminderEngine(context: Context) {
         val horizon = now.plusDays(HORIZON_DAYS)
         val resolver = ScheduleMath.TimeResolver(source.slots, source.meetings)
         val desired = ArrayList<Reminder>()
-        var untimed = 0
+        var estimated = 0
         for (meeting in source.meetings) {
+            // Same times as the app shows; estimated ones are flagged in the notification and in Settings.
             val range = resolver.resolve(meeting)
-            if (range == null) {
-                untimed++
-                continue
-            }
+            if (range.estimated) estimated++
             var date = now.toLocalDate()
             while (!date.isAfter(horizon.toLocalDate())) {
                 if (ScheduleMath.weekdayOf(date) == meeting.day) {
                     val week = ScheduleMath.teachingWeek(date, source.termStart, source.weekStartsOn)
                     if (week in 1..source.weekCount && ScheduleMath.inWeek(meeting.weeksMask, week)) {
-                        val startAt = LocalDateTime.of(date, range.start).atZone(source.zone)
+                        val startAt = range.startAt(date).atZone(source.zone)
                         val triggerAt = startAt.minusMinutes(offset.toLong())
                         if (triggerAt.isAfter(now) && !triggerAt.isAfter(horizon)) {
                             desired += Reminder(
-                                id = stableId("${meeting.id}|$date|${range.start}|$offset"),
+                                id = stableId("${meeting.id}|$date|${ScheduleMath.clock(range.startMinute)}|$offset"),
                                 triggerAtMs = triggerAt.toInstant().toEpochMilli(),
                                 title = title(meeting.name, offset),
                                 body = body(meeting, range, week)
@@ -100,9 +97,9 @@ class CourseReminderEngine(context: Context) {
             context,
             "INFO",
             "reminders.sync",
-            "future=${chosen.size} scheduled=$scheduled cancelled=${stale.size} untimed=$untimed exact=$exact"
+            "future=${chosen.size} scheduled=$scheduled cancelled=${stale.size} estimated=$estimated exact=$exact"
         )
-        return report(true, chosen.size, scheduled, stale.size, 0, untimed, null)
+        return report(true, chosen.size, scheduled, stale.size, 0, estimated, null)
     }
 
     /** One-off notification a minute from now, used by Settings to verify background delivery. */
@@ -114,7 +111,7 @@ class CourseReminderEngine(context: Context) {
     private fun title(name: String, offset: Int) = if (offset <= 0) "$name · 现在上课" else "$name · ${offset} 分钟后上课"
 
     private fun body(meeting: ScheduleMath.Meeting, range: ScheduleMath.TimeRange, week: Int): String = buildList {
-        add(if (range.end != null) "${range.start}–${range.end}" else "${range.start} 开始")
+        add(if (range.estimated) "${range.label}（估算时间）" else range.label)
         if (meeting.room.isNotBlank()) add(meeting.room)
         if (meeting.teacher.isNotBlank()) add(meeting.teacher)
         add("第 $week 周")
@@ -210,13 +207,13 @@ class CourseReminderEngine(context: Context) {
         return if (id == 0) 1 else id
     }
 
-    private fun report(enabled: Boolean, future: Int, scheduled: Int, cancelled: Int, skipped: Int, untimed: Int, problem: String?) = JSONObject()
+    private fun report(enabled: Boolean, future: Int, scheduled: Int, cancelled: Int, skipped: Int, estimated: Int, problem: String?) = JSONObject()
         .put("enabled", enabled)
         .put("futureCount", future)
         .put("scheduledCount", scheduled)
         .put("cancelledCount", cancelled)
         .put("skippedCount", skipped)
-        .put("untimedCount", untimed)
+        .put("estimatedCount", estimated)
         .put("horizonDays", HORIZON_DAYS)
         .put("problem", problem ?: JSONObject.NULL)
         .put("exactAlarmGranted", canScheduleExactAlarms())

@@ -71,12 +71,7 @@ class LumaDatabase private constructor(context: Context) {
         createSchema()
         if (!columnExists("courses", "credit")) db.execSQL("ALTER TABLE courses ADD COLUMN credit REAL")
         if (db.version < SCHEMA_VERSION) {
-            migrateLegacyDataUnlocked()
-            db.execSQL(
-                "UPDATE schedules SET name=(SELECT t.name FROM terms t WHERE t.id=schedules.term_id) " +
-                    "WHERE name LIKE '% · 导入课表' AND (SELECT t.name FROM terms t WHERE t.id=schedules.term_id) NOT IN ('', '导入学期', '手动课表')"
-            )
-            db.execSQL("UPDATE schedules SET name='我的课表' WHERE name='手动课表'")
+            migrateLegacyDataUnlocked(fromVersion = db.version)
             db.version = SCHEMA_VERSION
         }
     }
@@ -89,10 +84,14 @@ class LumaDatabase private constructor(context: Context) {
             found
         }
 
-    /** Folds settings written by older builds into the current schema. Safe to run repeatedly. */
-    fun runLegacyMigrations() = synchronized(lock) { transaction { migrateLegacyDataUnlocked() } }
+    /**
+     * Folds data written by older builds into the current schema: in place on
+     * upgrade, and after restoring a backup written with schema [fromVersion].
+     * Safe to run repeatedly.
+     */
+    fun runLegacyMigrations(fromVersion: Int) = synchronized(lock) { transaction { migrateLegacyDataUnlocked(fromVersion) } }
 
-    private fun migrateLegacyDataUnlocked() {
+    private fun migrateLegacyDataUnlocked(fromVersion: Int) {
         getSettingRawUnlocked(LEGACY_CREDIT_INDEX_KEY)?.let { raw ->
             runCatching { JSONObject(raw) }.getOrNull()?.let { index -> applyCreditIndexUnlocked(index) }
         }
@@ -106,15 +105,36 @@ class LumaDatabase private constructor(context: Context) {
             deleteSettingUnlocked(LEGACY_WEEKEND_KEY)
         }
         deleteSettingUnlocked("appearance.glass")
+
+        if (fromVersion < 2) {
+            // v1 named imported schedules "<term> · 导入课表" and the hand-made one "手动课表".
+            db.execSQL(
+                "UPDATE schedules SET name=(SELECT t.name FROM terms t WHERE t.id=schedules.term_id) " +
+                    "WHERE name LIKE '% · 导入课表' AND (SELECT t.name FROM terms t WHERE t.id=schedules.term_id) NOT IN ('', '导入学期', '手动课表')"
+            )
+            db.execSQL("UPDATE schedules SET name='我的课表' WHERE name='手动课表'")
+        }
     }
 
+    /**
+     * Applies a legacy name → credit index to courses that have no credit yet. Every
+     * entry is also kept in [CREDIT_FALLBACK_KEY]: grade records are matched by course
+     * name across terms, and the course an entry belonged to may already be gone
+     * (an overwritten term) or be deleted later. Existing fallback values win, which
+     * keeps the old precedence of the native index over the WebView copy.
+     */
     private fun applyCreditIndexUnlocked(index: JSONObject): Int {
         val normalized = HashMap<String, Double>()
         index.keys().forEach { key ->
             val value = index.optDouble(key, Double.NaN)
-            if (value.isFinite() && value in 0.0..30.0) normalized[ScheduleMath.normalizedName(key)] = value
+            val name = ScheduleMath.normalizedName(key)
+            if (name.isNotEmpty() && value.isFinite() && value in 0.0..30.0) normalized[name] = value
         }
         if (normalized.isEmpty()) return 0
+        val fallback = creditFallbackUnlocked()
+        var fallbackChanged = false
+        normalized.forEach { (name, credit) -> if (fallback.putIfAbsent(name, credit) == null) fallbackChanged = true }
+        if (fallbackChanged) setSettingRawUnlocked(CREDIT_FALLBACK_KEY, JSONObject(fallback.toMap()).toString())
         var updated = 0
         val targets = ArrayList<Pair<String, Double>>()
         db.rawQuery("SELECT id, name FROM courses WHERE credit IS NULL", null).use { cursor ->
@@ -129,7 +149,18 @@ class LumaDatabase private constructor(context: Context) {
         return updated
     }
 
+    /** Moves the WebView's legacy credit store into SQLite; returns only after everything is committed. */
     fun migrateLegacyCredits(byName: JSONObject): Int = synchronized(lock) { transaction { applyCreditIndexUnlocked(byName) } }
+
+    private fun creditFallbackUnlocked(): HashMap<String, Double> {
+        val result = HashMap<String, Double>()
+        val json = getSettingRawUnlocked(CREDIT_FALLBACK_KEY)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return result
+        json.keys().forEach { key ->
+            val value = json.optDouble(key, Double.NaN)
+            if (key.isNotEmpty() && value.isFinite() && value in 0.0..30.0) result[key] = value
+        }
+        return result
+    }
 
     // ------------------------------------------------------------------ settings
 
@@ -571,7 +602,11 @@ class LumaDatabase private constructor(context: Context) {
                     )
                 }
                 if (existingCourse != null) {
-                    db.execSQL("UPDATE courses SET credit=COALESCE(?, credit), color_token=? WHERE id=?", arrayOf(credit, color, courseId))
+                    // The new meeting joins an existing course: keep its credit and colour unless new ones were chosen.
+                    db.execSQL(
+                        "UPDATE courses SET credit=COALESCE(?, credit), color_token=CASE WHEN ?='auto' THEN color_token ELSE ? END WHERE id=?",
+                        arrayOf(credit, color, color, courseId)
+                    )
                 }
                 val meetingId = UUID.randomUUID().toString()
                 db.execSQL(
@@ -830,11 +865,15 @@ class LumaDatabase private constructor(context: Context) {
     // ------------------------------------------------------------------ grades
 
     fun gradeSnapshot(): JSONObject = synchronized(lock) {
-        val credits = HashMap<String, Double>()
-        activeScheduleIdUnlocked()?.let { scheduleId ->
-            db.rawQuery("SELECT name, credit FROM courses WHERE schedule_id=? AND credit IS NOT NULL", arrayOf(scheduleId)).use { cursor ->
-                while (cursor.moveToNext()) credits[ScheduleMath.normalizedName(cursor.getString(0))] = cursor.getDouble(1)
-            }
+        // Grade records without a credit borrow one by course name: legacy values first, then courses of
+        // every schedule (newer schedules override older ones), and the active schedule last so it wins.
+        val credits = creditFallbackUnlocked()
+        db.rawQuery(
+            "SELECT c.name, c.credit FROM courses c JOIN schedules s ON s.id=c.schedule_id WHERE c.credit IS NOT NULL " +
+                "ORDER BY (c.schedule_id=?), s.rowid, c.rowid",
+            arrayOf(activeScheduleIdUnlocked().orEmpty())
+        ).use { cursor ->
+            while (cursor.moveToNext()) credits[ScheduleMath.normalizedName(cursor.getString(0))] = cursor.getDouble(1)
         }
         val records = JSONArray()
         val terms = linkedSetOf<String>()
@@ -999,6 +1038,8 @@ class LumaDatabase private constructor(context: Context) {
         private const val LEGACY_WEEKEND_KEY = "schedule.weekend_mode"
         private const val LEGACY_CREDIT_INDEX_KEY = "course.credit.index"
         private const val LEGACY_CREDIT_META_PREFIX = "course.credit.meta."
+        /** Normalised course name → credit carried over from older builds, used only to fill grade records. */
+        private const val CREDIT_FALLBACK_KEY = "course.credit.fallback"
         private val WEEKEND_MODES = setOf("auto", "weekdays", "sat", "sun", "both")
         private val PLACEHOLDER_TERM_NAMES = setOf("导入学期", "手动课表")
 

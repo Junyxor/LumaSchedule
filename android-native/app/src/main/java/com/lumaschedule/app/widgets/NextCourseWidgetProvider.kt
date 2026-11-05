@@ -7,6 +7,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.view.View
 import android.widget.RemoteViews
 import com.lumaschedule.app.DiagnosticLog
@@ -60,7 +61,7 @@ class NextCourseWidgetProvider : AppWidgetProvider() {
             val launch = PendingIntent.getActivity(
                 app,
                 0,
-                Intent(app, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                MainActivity.launcherIntent(app),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             val views = RemoteViews(app.packageName, R.layout.widget_next_course).apply {
@@ -84,7 +85,18 @@ class NextCourseWidgetProvider : AppWidgetProvider() {
                 return
             }
             val at = maxOf(atMs + 1_000L, System.currentTimeMillis() + 30_000L)
-            runCatching { alarmManager.setWindow(AlarmManager.RTC, at, 60_000L, pending) }
+            // Android 12+ may stretch short windows to 10 minutes, which would leave "正在上课" up after
+            // class ends. Use an exact (non-wakeup) alarm when the user allowed exact alarms.
+            runCatching {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()) {
+                    alarmManager.setExact(AlarmManager.RTC, at, pending)
+                } else {
+                    alarmManager.setWindow(AlarmManager.RTC, at, 60_000L, pending)
+                }
+            }.recoverCatching {
+                // The exact-alarm permission can be revoked between the check and the call.
+                alarmManager.setWindow(AlarmManager.RTC, at, 60_000L, pending)
+            }
         }
 
         private fun refreshIntent(context: Context, flag: Int): PendingIntent? = PendingIntent.getBroadcast(

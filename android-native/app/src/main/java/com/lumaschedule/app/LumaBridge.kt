@@ -80,7 +80,8 @@ class LumaBridge(
     fun onResume() {
         executor.execute {
             runCatching {
-                if (database.remindersEnabled()) reminders.sync()
+                // sync() also cancels whatever is still armed when reminders are off.
+                reminders.sync()
                 NextCourseWidgetProvider.updateAll(activity)
             }.onFailure { DiagnosticLog.record(activity, "WARN", "lifecycle.refresh_failed", it.message.orEmpty()) }
         }
@@ -162,7 +163,7 @@ class LumaBridge(
                 val uri = activity.openDocumentBlocking(arrayOf("application/json", "application/octet-stream", "text/plain")) ?: return NULL
                 val text = activity.contentResolver.openInputStream(uri)?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() }
                     ?: error("无法读取备份文件。")
-                changed { transfer.restoreFullBackup(text) }.toString()
+                afterRestore(changed { transfer.restoreFullBackup(text) }).toString()
             }
 
             // WebDAV
@@ -176,21 +177,38 @@ class LumaBridge(
             "webdav_restore" -> {
                 val (result, backup) = webDav.download(args.getJSONObject("credentials"))
                 if (!result.optBoolean("ok") || backup == null) return result.toString()
-                val summary = changed { transfer.restoreFullBackup(backup) }
-                result.put("message", "已从云端恢复：${summary.optInt("courseCount")} 门课程。").put("backup", summary).toString()
+                val summary = afterRestore(changed { transfer.restoreFullBackup(backup) })
+                val note = if (summary.optBoolean("remindersDisabled")) "没有通知权限，上课提醒已关闭。" else ""
+                result.put("message", "已从云端恢复：${summary.optInt("courseCount")} 门课程。$note").put("backup", summary).toString()
             }
 
             else -> error("未知的原生命令：$command")
         }
     }
 
-    /** Runs a schedule mutation, then keeps reminders and the widget in step with it. */
+    /**
+     * Runs a schedule mutation, then keeps reminders and the widget in step with it.
+     * The resync is unconditional: a restore can switch reminders off, and sync()
+     * then cancels the alarms that are still armed for the replaced schedule.
+     */
     private fun <T> changed(block: () -> T): T {
         val result = block()
-        runCatching { if (database.remindersEnabled()) reminders.sync() }
+        runCatching { reminders.sync() }
             .onFailure { DiagnosticLog.record(activity, "WARN", "reminders.resync_failed", it.message.orEmpty()) }
         runCatching { NextCourseWidgetProvider.updateAll(activity) }
         return result
+    }
+
+    /**
+     * A restored backup can switch reminders on. Ask for the notification permission
+     * the way the reminder switch does; without it, turn reminders off instead of
+     * arming alarms that cannot show anything.
+     */
+    private fun afterRestore(summary: JSONObject): JSONObject {
+        if (!database.remindersEnabled() || activity.ensureNotificationPermissionBlocking()) return summary
+        database.saveReminderSettings(database.reminderSettings().put("enabled", false))
+        runCatching { reminders.sync() }
+        return summary.put("remindersDisabled", true)
     }
 
     private fun diagnosticReport(): String =

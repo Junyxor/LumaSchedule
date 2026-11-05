@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { CalendarPlus, CalendarX2, ChevronRight, Coffee, Download, MapPin, Sparkles, User } from 'lucide-svelte';
+  import { CalendarPlus, CalendarX2, ChevronRight, Clock3, Coffee, Download, MapPin, Sparkles, User } from 'lucide-svelte';
   import { app } from '../state/app.svelte';
   import { addDays, durationLabel, findUpcoming, formatClock, minutesOfDay, monthDayLabel, occurrencesOn, rangeLabel, relativeDayLabel, sectionLabel, WEEKDAY_SHORT, weekdayOf, type Occurrence } from '../schedule/calendar';
   import { courseSheets, toneClass } from '../schedule/courseSheets.svelte';
@@ -131,6 +131,12 @@
       <button class="notice unset" type="button" onclick={openTermSettings}>
         <CalendarX2 size={18} />
         <span><b>还没有设置开学日期。</b>设置后才能区分单双周、计算教学周，并安排上课提醒。</span>
+        <ChevronRight size={18} />
+      </button>
+    {:else if app.estimatedCount > 0}
+      <button class="notice unset" type="button" onclick={() => app.openSettings('times')}>
+        <Clock3 size={18} />
+        <span><b>{app.estimatedCount} 个上课时段没有具体时间，</b>暂按常见作息显示，上课提醒和桌面小组件也用这个时间。点这里设置作息时间。</span>
         <ChevronRight size={18} />
       </button>
     {/if}

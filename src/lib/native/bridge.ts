@@ -13,20 +13,28 @@ export interface LumaNativeInterface {
   setSystemBarsDark?(dark: boolean): void;
   /** Android's system dark mode. More reliable than prefers-color-scheme inside WebView. */
   isSystemDark?(): boolean;
-  /** System bar insets in CSS pixels as JSON: {"top":24,"right":0,"bottom":16,"left":0}. */
+  /**
+   * System bar insets in CSS pixels plus the WebView text zoom in percent, as JSON:
+   * {"top":24,"right":0,"bottom":16,"left":0,"textZoom":115}.
+   */
   getInsets?(): string;
 }
 
-/** Applies Android's system bar insets before the first paint; later changes are pushed by Kotlin. */
+/**
+ * Applies Android's system bar insets and text zoom before the first paint; later
+ * changes are pushed by Kotlin. `--text-zoom` lets dense layouts (the week grid)
+ * follow the system font size less than the rest of the UI.
+ */
 export function applyNativeInsets() {
   try {
     const raw = window.LumaNative?.getInsets?.();
     if (!raw) return;
-    const insets = JSON.parse(raw) as Record<'top' | 'right' | 'bottom' | 'left', number>;
+    const insets = JSON.parse(raw) as Record<'top' | 'right' | 'bottom' | 'left', number> & { textZoom?: number };
     const style = document.documentElement.style;
     for (const side of ['top', 'right', 'bottom', 'left'] as const) {
       if (Number.isFinite(insets[side])) style.setProperty(`--native-inset-${side}`, `${insets[side]}px`);
     }
+    if (typeof insets.textZoom === 'number' && insets.textZoom > 0) style.setProperty('--text-zoom', String(insets.textZoom / 100));
   } catch {
     // env(safe-area-inset-*) still applies.
   }

@@ -1,6 +1,6 @@
 import { api, migrateLegacyCredits } from '../native/api';
 import { errorMessage, hasNative } from '../native/bridge';
-import { buildSectionTimes, sectionCountFor, termContext } from '../schedule/calendar';
+import { buildSectionTimes, courseTimeEstimated, sectionCountFor, termContext, wallClock } from '../schedule/calendar';
 import type { AccentId, Appearance, DisplayPreferences, PageId, Semester, ThemeMode } from '../types';
 
 export const emptySemester = (): Semester => ({
@@ -69,18 +69,23 @@ class AppState {
   semester = $state.raw<Semester>(emptySemester());
   display = $state.raw<DisplayPreferences>(defaultDisplay());
   appearance = $state.raw<Appearance>(cachedAppearance());
-  now = $state.raw(new Date());
+  /** Device clock, refreshed by tick(). */
+  #instant = $state.raw(new Date());
+  /** Wall-clock time in the term's time zone (see `wallClock`), the same clock reminders and the widget use. */
+  now = $derived(wallClock(this.semester.timezone, this.#instant));
   /** Settings sub-page to open next time the settings tab is shown. */
   settingsTarget = $state<string | null>(null);
 
   ctx = $derived(termContext(this.semester, this.now));
   sectionCount = $derived(sectionCountFor(this.semester, this.display.defaultSections));
   sections = $derived(buildSectionTimes(this.semester, this.sectionCount));
+  /** Meetings shown at typical-day times because neither the course nor the timetable has a time for them. */
+  estimatedCount = $derived(this.semester.courses.filter((course) => courseTimeEstimated(course, this.sections)).length);
 
   #loading: Promise<void> | null = null;
 
   tick() {
-    this.now = new Date();
+    this.#instant = new Date();
   }
 
   async start() {
@@ -121,7 +126,7 @@ class AppState {
         this.loadError = errorMessage(error);
       } finally {
         this.ready = true;
-        this.now = new Date();
+        this.tick();
       }
     })().finally(() => {
       this.#loading = null;

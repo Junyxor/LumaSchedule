@@ -44,7 +44,10 @@
   const columns = $derived(days.map((day) => ({ day, date: dateOfWeekDay(ctx, selectedWeek, day, app.now) })));
   const firstDate = $derived(columns[0]?.date ?? app.now);
   const lastDate = $derived(columns[columns.length - 1]?.date ?? app.now);
-  const weekCourses = $derived(app.semester.courses.filter((course) => courseInWeek(course, selectedWeek)));
+  // Without a start date the week number is hypothetical, so every course shows every week (like Today and the widget).
+  const weekCourses = $derived(
+    ctx.status === 'unset' ? app.semester.courses : app.semester.courses.filter((course) => courseInWeek(course, selectedWeek))
+  );
   const colorful = $derived(app.appearance.colorfulCourses);
   const compact = $derived(app.display.compactMode);
 
@@ -302,6 +305,8 @@
 
   .board {
     --axis: 34px;
+    /* Android scales all text by --text-zoom (system font size); the dense grid follows it only up to 110 %. */
+    --grid-text: calc(min(var(--text-zoom, 1), 1.1) / var(--text-zoom, 1));
     position: relative;
     display: flex;
     flex: 1;
@@ -424,14 +429,14 @@
   }
 
   .axis-cell b {
-    font-size: var(--text-sm);
+    font-size: calc(var(--text-sm) * var(--grid-text));
     font-weight: 650;
     line-height: 1.2;
   }
 
   .axis-cell span {
     color: var(--text-3);
-    font-size: 10px;
+    font-size: calc(10px * var(--grid-text));
     line-height: 1.2;
   }
 
@@ -476,7 +481,7 @@
   .course b {
     display: -webkit-box;
     overflow: hidden;
-    font-size: 12px;
+    font-size: calc(12px * var(--grid-text));
     font-weight: 650;
     line-height: 1.25;
     word-break: break-all;
@@ -487,7 +492,7 @@
 
   .course span {
     overflow: hidden;
-    font-size: 10.5px;
+    font-size: calc(10.5px * var(--grid-text));
     line-height: 1.25;
     opacity: 0.8;
     word-break: break-all;
@@ -512,7 +517,7 @@
   }
 
   .compact .course b {
-    font-size: 11px;
+    font-size: calc(11px * var(--grid-text));
     -webkit-line-clamp: 3;
     line-clamp: 3;
   }
@@ -635,11 +640,11 @@
     }
 
     .course b {
-      font-size: 13px;
+      font-size: calc(13px * var(--grid-text));
     }
 
     .course span {
-      font-size: 11.5px;
+      font-size: calc(11.5px * var(--grid-text));
     }
 
     .course .t-end {

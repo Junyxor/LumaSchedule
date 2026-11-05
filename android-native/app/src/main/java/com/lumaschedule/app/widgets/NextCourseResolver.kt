@@ -3,7 +3,6 @@ package com.lumaschedule.app.widgets
 import com.lumaschedule.app.data.LumaDatabase
 import com.lumaschedule.app.data.ScheduleMath
 import java.time.LocalDate
-import java.time.LocalDateTime
 import java.time.ZonedDateTime
 import java.time.temporal.ChronoUnit
 
@@ -18,7 +17,13 @@ object NextCourseResolver {
         val refreshAtMs: Long?
     )
 
-    private data class Occurrence(val meeting: ScheduleMath.Meeting, val date: LocalDate, val start: ZonedDateTime, val end: ZonedDateTime)
+    private data class Occurrence(
+        val meeting: ScheduleMath.Meeting,
+        val date: LocalDate,
+        val start: ZonedDateTime,
+        val end: ZonedDateTime,
+        val estimated: Boolean
+    )
 
     fun resolve(source: LumaDatabase.CalendarSource?, instant: ZonedDateTime): State {
         if (source == null) return State("LumaSchedule", "还没有课表", "打开应用导入课表", "", null)
@@ -38,20 +43,21 @@ object NextCourseResolver {
             for (meeting in source.meetings) {
                 if (meeting.day != ScheduleMath.weekdayOf(date)) continue
                 if (week != null && !ScheduleMath.inWeek(meeting.weeksMask, week)) continue
-                val range = resolver.resolve(meeting) ?: continue
-                val start = LocalDateTime.of(date, range.start).atZone(source.zone)
-                val end = range.end?.let { LocalDateTime.of(date, it).atZone(source.zone) } ?: start.plusMinutes(45)
-                occurrences += Occurrence(meeting, date, start, end)
+                // Same times as the app shows, including estimated ones (marked with 约 below).
+                val range = resolver.resolve(meeting)
+                occurrences += Occurrence(meeting, date, range.startAt(date).atZone(source.zone), range.endAt(date).atZone(source.zone), range.estimated)
             }
         }
         occurrences.sortWith(compareBy<Occurrence> { it.start }.thenBy { it.meeting.name })
 
         val current = occurrences.firstOrNull { !it.start.isAfter(now) && it.end.isAfter(now) }
         if (current != null) {
+            val approx = if (current.estimated) "约 " else ""
             return State(
-                label = "正在上课 · 至 ${clock(current.end)}",
+                label = "正在上课 · 至 $approx${clock(current.end)}",
                 title = current.meeting.name,
-                meta = listOf(current.meeting.room, current.meeting.teacher).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "${clock(current.start)}–${clock(current.end)}" },
+                meta = listOf(current.meeting.room, current.meeting.teacher).filter { it.isNotBlank() }.joinToString(" · ")
+                    .ifBlank { "$approx${clock(current.start)}–${clock(current.end)}" },
                 badge = badge,
                 refreshAtMs = current.end.toInstant().toEpochMilli()
             )
@@ -59,12 +65,13 @@ object NextCourseResolver {
         val next = occurrences.firstOrNull { it.start.isAfter(now) }
         if (next != null) {
             val days = ChronoUnit.DAYS.between(today, next.date)
+            val at = (if (next.estimated) "约 " else "") + clock(next.start)
             val label = when (days) {
-                0L -> "下一节 · ${clock(next.start)}"
-                1L -> "明天 ${clock(next.start)}"
-                2L -> "后天 ${clock(next.start)}"
-                in 3L..6L -> "${ScheduleMath.weekdayLabel(ScheduleMath.weekdayOf(next.date))} ${clock(next.start)}"
-                else -> "${next.date.monthValue}月${next.date.dayOfMonth}日 ${clock(next.start)}"
+                0L -> "下一节 · $at"
+                1L -> "明天 $at"
+                2L -> "后天 $at"
+                in 3L..6L -> "${ScheduleMath.weekdayLabel(ScheduleMath.weekdayOf(next.date))} $at"
+                else -> "${next.date.monthValue}月${next.date.dayOfMonth}日 $at"
             }
             val meta = listOf("${clock(next.start)}–${clock(next.end)}", next.meeting.room).filter { it.isNotBlank() }.joinToString(" · ")
             val refresh = if (next.start.isBefore(nextMidnight)) next.start else nextMidnight

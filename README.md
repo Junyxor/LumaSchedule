@@ -51,6 +51,7 @@ LumaSchedule 也兼容部分 WakeUp 常见课表数据和学校配置格式；Wa
 - 只滚动安排未来两周的提醒，避开 Android 单应用约 500 个闹钟的上限；开机、改时间、提醒触发后自动续排
 - 「下一节课」桌面小组件在原生层直接读取课表，上课和下课时自动更新，支持深色模式
 - 课程或课表变更后自动刷新提醒和小组件
+- 还没设置作息时间的课程按常见作息估算时间，应用、提醒和小组件显示同一个时间，并提示去设置
 
 ### 导入、导出与备份
 
@@ -58,7 +59,7 @@ LumaSchedule 也兼容部分 WakeUp 常见课表数据和学校配置格式；Wa
 
 - LumaSchedule / 通用 JSON（导出的 JSON 可以完整导回，包括作息时间和学分）
 - WakeUp「导出为文件」得到的 `.wakeup_schedule` 备份，以及常见 WakeUp JSON 字段
-- ICS / iCalendar（支持 RRULE、EXDATE 和 UTC 时间，可导回本应用导出的日历）
+- ICS / iCalendar（支持 RRULE、EXDATE 和 UTC 时间；本应用导出的日历可以原样导回，包括周日起始的周次）
 - CSV / TSV（自动识别中文表头和 GBK 编码）
 - CSES v1 YAML
 - 导出 ICS 到系统日历

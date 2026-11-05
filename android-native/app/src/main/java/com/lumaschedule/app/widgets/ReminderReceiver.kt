@@ -65,7 +65,7 @@ class ReminderReceiver : BroadcastReceiver() {
             val launch = PendingIntent.getActivity(
                 context,
                 0,
-                Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+                MainActivity.launcherIntent(context),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             val notification = Notification.Builder(context, CHANNEL_ID)

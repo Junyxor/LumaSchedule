@@ -8,7 +8,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.time.Instant
-import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
@@ -78,19 +77,23 @@ class DataTransferEngine(private val database: LumaDatabase) {
         line("METHOD:PUBLISH")
         line("X-WR-CALNAME:${escape(source.termName.ifBlank { source.scheduleName })}")
         line("X-WR-TIMEZONE:${source.zone.id}")
+        // Read back by the ICS importer so week numbers survive a round trip, including Sunday-first weeks.
+        line("X-LUMA-TERM-START:$termStart")
+        line("X-LUMA-WEEK-START:${source.weekStartsOn}")
+        line("X-LUMA-WEEK-COUNT:${source.weekCount}")
         var exported = 0
         for (meeting in source.meetings) {
-            val range = resolver.resolve(meeting) ?: continue
-            val end = range.end ?: range.start.plusMinutes(45L * (maxOf(meeting.endSection, meeting.startSection) - meeting.startSection + 1))
+            val range = resolver.resolve(meeting)
             for (week in 1..source.weekCount) {
                 if (!ScheduleMath.inWeek(meeting.weeksMask, week)) continue
                 val date = ScheduleMath.dateOf(termStart, source.weekStartsOn, week, meeting.day)
-                val startAt = LocalDateTime.of(date, range.start).atZone(source.zone).toInstant()
-                val endAt = LocalDateTime.of(date, end).atZone(source.zone).toInstant()
+                val startAt = range.startAt(date).atZone(source.zone).toInstant()
+                val endAt = range.endAt(date).atZone(source.zone).toInstant()
                 val details = buildList {
                     if (meeting.teacher.isNotBlank()) add("教师：${meeting.teacher}")
                     add("第 $week 周")
                     add(if (meeting.startSection == meeting.endSection) "第 ${meeting.startSection} 节" else "第 ${meeting.startSection}–${meeting.endSection} 节")
+                    if (range.estimated) add("时间按常见作息估算")
                 }.joinToString(" · ")
                 line("BEGIN:VEVENT")
                 line("UID:${escape("${meeting.id}-$week@lumaschedule")}")
@@ -105,7 +108,7 @@ class DataTransferEngine(private val database: LumaDatabase) {
             }
         }
         line("END:VCALENDAR")
-        require(exported > 0) { "没有可以导出的上课时间。请先在「作息时间」中设置每节课的时间。" }
+        require(exported > 0) { "课表在 ${source.weekCount} 个教学周内没有课程，没有可以导出的内容。" }
         return out.toString()
     }
 
@@ -146,7 +149,7 @@ class DataTransferEngine(private val database: LumaDatabase) {
             }
             summary(db, TABLES.sumOf { count(db, it) })
         }
-        database.runLegacyMigrations()
+        database.runLegacyMigrations(fromVersion = version)
         return result
     }
 

@@ -119,8 +119,8 @@ export interface ReminderSyncReport {
   skippedCount: number;
   exactAlarmGranted: boolean;
   horizonDays?: number;
-  /** Meetings without a known clock time; they cannot get a reminder. */
-  untimedCount?: number;
+  /** Meetings whose clock time is estimated from a typical day; their reminders use that estimate. */
+  estimatedCount?: number;
   problem?: 'missingTermStart' | 'noSchedule' | null;
 }
 
@@ -275,6 +275,8 @@ export interface BackupSummary {
   scheduleCount: number;
   courseCount: number;
   meetingCount: number;
+  /** The backup had reminders on, but notification permission was refused, so they were turned off. */
+  remindersDisabled?: boolean;
 }
 
 export interface WebDavProfile {

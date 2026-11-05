@@ -41,7 +41,8 @@
         toast.show('已取消');
         return;
       }
-      toast.success(`恢复完成：${summary.courseCount} 门课程，${summary.meetingCount} 个时段`);
+      const note = summary.remindersDisabled ? '。没有通知权限，上课提醒已关闭' : '';
+      toast.success(`恢复完成：${summary.courseCount} 门课程，${summary.meetingCount} 个时段${note}`);
       await app.start();
     });
 </script>
