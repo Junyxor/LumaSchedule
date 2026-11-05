@@ -8,15 +8,17 @@
 
     <application
         android:allowBackup="true"
-        android:label="LumaSchedule"
         android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">
 
+        <!-- configChanges keeps the web UI (and any open sheet) alive across rotation and dark-mode switches. -->
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
             android:exported="true"
-            android:screenOrientation="unspecified">
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -25,8 +27,11 @@
 
         <activity
             android:name=".shiguang.ShiguangImportActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:excludeFromRecents="true"
             android:exported="false"
-            android:excludeFromRecents="true" />
+            android:theme="@style/ImportTheme"
+            android:windowSoftInputMode="adjustResize" />
 
         <receiver
             android:name=".widgets.NextCourseWidgetProvider"
@@ -50,6 +55,8 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>

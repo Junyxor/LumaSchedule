@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">LumaSchedule</string>
+    <string name="widget_description">显示正在上的课或下一节课</string>
+    <string name="widget_preview_label">下一节 · 13:50</string>
+    <string name="widget_preview_badge">第 9 周</string>
+    <string name="widget_preview_title">大学英语</string>
+    <string name="widget_preview_meta">13:50–15:25 · 教3-106</string>
 </resources>

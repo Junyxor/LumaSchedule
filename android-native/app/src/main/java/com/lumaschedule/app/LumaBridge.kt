@@ -1,11 +1,5 @@
 package com.lumaschedule.app
 
-import android.app.AlarmManager
-import android.app.PendingIntent
-import android.appwidget.AppWidgetManager
-import android.content.ComponentName
-import android.content.Context
-import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
 import android.webkit.JavascriptInterface
@@ -15,34 +9,33 @@ import com.lumaschedule.app.data.LumaDatabase
 import com.lumaschedule.app.reminders.CourseReminderEngine
 import com.lumaschedule.app.shiguang.ShiguangRepository
 import com.lumaschedule.app.sync.WebDavClient
-import com.lumaschedule.app.widgets.BootReceiver
 import com.lumaschedule.app.widgets.NextCourseWidgetProvider
 import com.lumaschedule.app.widgets.ReminderReceiver
+import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ExecutorService
 
+/**
+ * `window.LumaNative` for the bundled web UI. `request` is asynchronous: work
+ * runs on [executor] and the result is delivered through
+ * `window.__lumaNativeResolve(id, ok, json)`. The other methods are small
+ * synchronous helpers for system chrome.
+ */
 class LumaBridge(
     private val activity: MainActivity,
     private val webView: WebView,
-    private val database: LumaDatabase,
     private val executor: ExecutorService,
     private val launchStarted: Long
 ) {
     @Volatile private var uiReadyMs: Long = -1
-    private val reminderEngine by lazy(LazyThreadSafetyMode.NONE) {
-        CourseReminderEngine(activity.applicationContext)
-    }
-    private val shiguang by lazy(LazyThreadSafetyMode.NONE) {
-        ShiguangRepository(activity.applicationContext)
-    }
-    private val transfer by lazy(LazyThreadSafetyMode.NONE) {
-        DataTransferEngine(File(activity.filesDir, "lumaschedule.sqlite"))
-    }
-    private val webDav by lazy(LazyThreadSafetyMode.NONE) { WebDavClient() }
+    private val database = LumaDatabase.get(activity)
+    private val reminders by lazy { CourseReminderEngine(activity) }
+    private val shiguang by lazy { ShiguangRepository(activity.applicationContext) }
+    private val transfer by lazy { DataTransferEngine(database) }
+    private val webDav by lazy { WebDavClient() }
 
     @JavascriptInterface
     fun request(id: String, command: String, payload: String?) {
@@ -51,12 +44,7 @@ class LumaBridge(
             val started = SystemClock.elapsedRealtime()
             runCatching { route(command, payload.orEmpty()) }
                 .onSuccess { result ->
-                    DiagnosticLog.record(
-                        activity,
-                        "INFO",
-                        "bridge.$command",
-                        "ok durationMs=${SystemClock.elapsedRealtime() - started}"
-                    )
+                    DiagnosticLog.record(activity, "INFO", "bridge.$command", "ok durationMs=${SystemClock.elapsedRealtime() - started}")
                     resolve(id, true, result)
                 }
                 .onFailure { error ->
@@ -66,586 +54,251 @@ class LumaBridge(
                         "bridge.$command",
                         "${error.javaClass.simpleName}: ${error.message.orEmpty()} durationMs=${SystemClock.elapsedRealtime() - started}"
                     )
-                    resolve(
-                        id,
-                        false,
-                        JSONObject().put("message", error.message ?: "Native command failed").toString()
-                    )
+                    resolve(id, false, JSONObject().put("message", error.message ?: "操作失败").toString())
                 }
         }
     }
 
+    @JavascriptInterface
+    fun setBackEnabled(enabled: Boolean) = activity.setWebBackEnabled(enabled)
+
+    @JavascriptInterface
+    fun setSystemBarsDark(dark: Boolean) = activity.setSystemBarsDark(dark)
+
+    @JavascriptInterface
+    fun isSystemDark(): Boolean = activity.isSystemDark()
+
+    @JavascriptInterface
+    fun getInsets(): String = activity.insetsJson()
+
     fun markUiReady() {
         uiReadyMs = SystemClock.elapsedRealtime() - launchStarted
         DiagnosticLog.record(activity, "INFO", "ui.ready", "startupMs=$uiReadyMs")
-        activity.runOnUiThread {
-            webView.evaluateJavascript(
-                "window.dispatchEvent(new CustomEvent('luma-native-ready',{detail:{startupMs:$uiReadyMs}}));",
-                null
-            )
+    }
+
+    /** Called when the app returns to the foreground. */
+    fun onResume() {
+        executor.execute {
+            runCatching {
+                if (database.remindersEnabled()) reminders.sync()
+                NextCourseWidgetProvider.updateAll(activity)
+            }.onFailure { DiagnosticLog.record(activity, "WARN", "lifecycle.refresh_failed", it.message.orEmpty()) }
         }
     }
 
     private fun route(command: String, raw: String): String {
         val args = raw.takeIf { it.isNotBlank() }?.let(::JSONObject) ?: JSONObject()
         return when (command) {
-            "get_bootstrap" -> {
-                val glass = database.getSettingRaw("appearance.glass")
-                JSONObject()
-                    .put("appVersion", BuildConfig.VERSION_NAME)
-                    .put(
-                        "glassSettings",
-                        glass?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject.NULL
-                    )
-                    .put("dbReady", true)
-                    .put("nativeCore", true)
-                    .put("startupMs", uiReadyMs)
-                    .toString()
-            }
+            "get_bootstrap" -> JSONObject()
+                .put("appVersion", BuildConfig.VERSION_NAME)
+                .put("appearance", database.appearance() ?: JSONObject.NULL)
+                .put("dbReady", true)
+                .toString()
 
             "check_update" -> checkUpdate().toString()
 
-            "get_schedule_snapshot" -> withCourseCredits(database.getScheduleSnapshot()).toString()
+            // Schedule
+            "get_semester" -> database.semester().toString()
+            "get_display_preferences" -> database.displayPreferences().toString()
+            "save_display_preferences" -> database.saveDisplayPreferences(args.getJSONObject("preferences")).toString()
+            "save_term_settings" -> changed { database.saveTermSettings(args.getJSONObject("term")) }.toString()
+            "save_time_slots" -> changed { database.saveTimeSlots(args.getJSONArray("slots")) }.toString()
+            "list_schedules" -> database.listSchedules().toString()
+            "activate_schedule" -> changed { database.activateSchedule(args.getString("id")) }.let { NULL }
+            "create_schedule" -> changed { database.createSchedule(args.getString("name")) }.let { NULL }
+            "rename_schedule" -> database.renameSchedule(args.getString("id"), args.getString("name")).let { NULL }
+            "delete_schedule" -> changed { database.deleteSchedule(args.getString("id")) }.let { NULL }
+            "save_course" -> JSONObject().put("value", changed { database.saveCourse(args.getJSONObject("course")) }).toString()
+            "delete_course" -> changed { database.deleteCourse(args.getString("id")) }.let { NULL }
+            "save_appearance" -> database.saveAppearance(args.getJSONObject("appearance")).let { NULL }
+            "migrate_legacy_credits" -> JSONObject().put("value", database.migrateLegacyCredits(args.optJSONObject("byName") ?: JSONObject())).toString()
 
-            "get_schedule_preferences" -> {
-                val result = database.getSchedulePreferences()
-                val storedMode = database.getSettingRaw(WEEKEND_MODE_KEY)
-                    ?.trim()
-                    ?.removeSurrounding("\"")
-                    ?.takeIf(::validWeekendMode)
-                    ?: if (result.has("showWeekend") && !result.optBoolean("showWeekend", true)) "weekdays" else "auto"
-                result.put("weekendMode", storedMode).toString()
-            }
-
-            "save_schedule_preferences" -> {
-                val input = args.getJSONObject("preferences")
-                val requestedMode = input.optString("weekendMode", "auto").takeIf(::validWeekendMode) ?: "auto"
-                input.put("showWeekend", requestedMode != "weekdays")
-                val result = database.saveSchedulePreferences(input)
-                database.setSettingRaw(WEEKEND_MODE_KEY, JSONObject.quote(requestedMode))
-                result.put("weekendMode", requestedMode)
-                resyncRemindersIfEnabled()
-                result.toString()
-            }
-
-            "get_grade_snapshot" -> withScheduleCreditFallback(database.getGradeSnapshot()).toString()
-
-            "commit_grade_bundle" -> database
-                .commitGradeBundle(args.getJSONObject("bundle"))
-                .toString()
-
-            "save_schedule_course" -> {
-                val course = args.getJSONObject("course")
-                val id = database.saveScheduleCourse(course)
-                saveCourseCredit(id, course)
-                resyncRemindersIfEnabled()
-                JSONObject().put("value", id).toString()
-            }
-
-            "delete_schedule_course" -> {
-                val id = args.getString("id")
-                forgetCourseCredit(id)
-                database.deleteScheduleCourse(id)
-                resyncRemindersIfEnabled()
-                "null"
-            }
-
-            "save_glass_settings" -> {
-                database.setSettingRaw("appearance.glass", args.getJSONObject("settings").toString())
-                "null"
-            }
-
+            // Import
             "preview_import_bundle" -> database.previewImport(args.getJSONObject("bundle")).toString()
+            "commit_import_bundle" -> changed { database.commitImport(args.getJSONObject("bundle"), args.optString("mode", "new")) }.toString()
 
-            "commit_import_bundle" -> {
-                val result = database.commitImport(
-                    args.getJSONObject("bundle"),
-                    args.optString("mode", "new")
-                )
-                resyncRemindersIfEnabled()
-                result.toString()
+            // Grades
+            "get_grade_snapshot" -> database.gradeSnapshot().toString()
+            "commit_grade_bundle" -> database.commitGradeBundle(args.getJSONObject("bundle")).toString()
+            "delete_grade_records" -> JSONObject()
+                .put("value", database.deleteGradeRecords(args.optString("term").takeIf { args.has("term") && !args.isNull("term") && it.isNotBlank() }))
+                .toString()
+
+            // Reminders & widget
+            "get_reminder_settings" -> database.reminderSettings().toString()
+            "save_reminder_settings" -> database.saveReminderSettings(args.getJSONObject("settings")).toString()
+            "sync_reminders" -> {
+                if (database.remindersEnabled() && !activity.ensureNotificationPermissionBlocking()) error("没有通知权限，无法安排上课提醒。")
+                reminders.sync().toString()
             }
-
-            "update_widget_snapshot" -> JSONObject()
-                .put("value", updateWidget(args.getJSONObject("snapshot")))
+            "request_notification_permission" -> JSONObject().put("value", activity.ensureNotificationPermissionBlocking()).toString()
+            "test_notification" -> JSONObject().put("value", sendTestNotification()).toString()
+            "schedule_test_reminder" -> JSONObject()
+                .put("value", activity.ensureNotificationPermissionBlocking() && reminders.scheduleTest(args.optLong("delayMs", 60_000L)))
                 .toString()
-
-            "test_notification" -> JSONObject()
-                .put("value", sendTestNotification())
-                .toString()
-
-            "request_notification_permission" -> JSONObject()
-                .put("value", activity.ensureNotificationPermissionBlocking())
-                .toString()
-
             "get_exact_alarm_status" -> JSONObject()
                 .put("required", Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-                .put("granted", activity.canScheduleExactAlarms())
+                .put("granted", reminders.canScheduleExactAlarms())
                 .toString()
+            "request_exact_alarm_access" -> JSONObject().put("value", activity.requestExactAlarmAccess()).toString()
+            "refresh_widgets" -> NextCourseWidgetProvider.updateAll(activity).let { NULL }
 
-            "request_exact_alarm_access" -> JSONObject()
-                .put("value", activity.requestExactAlarmAccess())
-                .toString()
+            // University adapters
+            "shiguang_list_schools" -> shiguang.listSchools(args.optString("query").takeIf { it.isNotBlank() }).toString()
+            "shiguang_list_adapters" -> shiguang.listAdapters(args.getString("schoolId")).toString()
+            "shiguang_start_import" -> shiguang.startImport(activity, args.getString("schoolId"), args.getString("adapterId")).toString()
+            "shiguang_start_smart_import" -> shiguang.startSmartImport(activity, args.getString("url"), args.optString("schoolName")).toString()
+            "shiguang_start_custom_import" -> shiguang.startCustomImport(activity, args.getString("url"), args.getString("family"), args.optString("schoolName")).toString()
+            "shiguang_start_grade_capture" -> shiguang.startGradeCapture(activity, args.getString("url"), args.optString("institution")).toString()
+            "shiguang_get_session" -> shiguang.session(args.getString("sessionId")).toString()
+            "shiguang_close_session" -> shiguang.closeSession(args.getString("sessionId")).let { NULL }
 
-            "schedule_native_reminder" -> JSONObject()
-                .put("value", scheduleReminder(args.getJSONObject("reminder")))
-                .toString()
-
-            "cancel_native_reminder" -> JSONObject()
-                .put("value", cancelReminder(args.getJSONObject("reminder").getInt("id")))
-                .toString()
-
-            "get_course_reminder_settings" -> {
-                database.getSettingRaw("reminders.course.default")
-                    ?: JSONObject()
-                        .put("enabled", false)
-                        .put("offsetMinutes", 15)
-                        .toString()
-            }
-
-            "save_course_reminder_settings" -> {
-                val input = args.getJSONObject("settings")
-                val normalized = JSONObject()
-                    .put("enabled", input.optBoolean("enabled", false))
-                    .put("offsetMinutes", input.optInt("offsetMinutes", 15).coerceIn(0, 180))
-                database.setSettingRaw("reminders.course.default", normalized.toString())
-                normalized.toString()
-            }
-
-            "sync_course_reminders" -> {
-                val settings = database.getSettingRaw("reminders.course.default")
-                    ?.let { runCatching { JSONObject(it) }.getOrNull() }
-                if (settings?.optBoolean("enabled", false) == true &&
-                    !activity.ensureNotificationPermissionBlocking()
-                ) {
-                    error("没有获得系统通知权限，无法安排课程提醒。")
-                }
-                reminderEngine.sync().toString()
-            }
-
-            "shiguang_list_schools" -> shiguang
-                .listSchools(args.optString("query").takeIf { it.isNotBlank() })
-                .toString()
-
-            "shiguang_list_adapters" -> shiguang
-                .listAdapters(args.getString("schoolId"))
-                .toString()
-
-            "shiguang_start_import" -> shiguang
-                .startImport(
-                    activity,
-                    args.getString("schoolId"),
-                    args.getString("adapterId")
-                )
-                .toString()
-
-            "shiguang_start_smart_import" -> shiguang
-                .startSmartImport(
-                    activity,
-                    args.getString("url"),
-                    args.optString("schoolName")
-                )
-                .toString()
-
-            "shiguang_start_custom_import" -> shiguang
-                .startCustomImport(
-                    activity,
-                    args.getString("url"),
-                    args.getString("family"),
-                    args.optString("schoolName")
-                )
-                .toString()
-
-            "shiguang_start_grade_capture" -> shiguang
-                .startGradeCapture(
-                    activity,
-                    args.getString("url"),
-                    args.optString("institution")
-                )
-                .toString()
-
-            "shiguang_get_session" -> shiguang
-                .session(args.getString("sessionId"))
-                .toString()
-
-            "shiguang_close_session" -> {
-                shiguang.closeSession(args.getString("sessionId"))
-                "null"
-            }
-
-            "export_latest_schedule_json_to_file" -> saveTextDocument(
-                "application/json",
-                "lumaschedule-schedule.json",
-                transfer.exportCanonicalJson()
-            ).toString()
-
-            "export_latest_schedule_ics_to_file" -> saveTextDocument(
-                "text/calendar",
-                "lumaschedule-schedule.ics",
-                transfer.exportIcs()
-            ).toString()
-
-            "export_full_backup_to_file" -> saveTextDocument(
-                "application/json",
-                "lumaschedule-latest.luma.json",
-                transfer.exportFullBackup(BuildConfig.VERSION_NAME)
-            ).toString()
-
-            "export_diagnostic_log_to_file" -> saveTextDocument(
-                "text/plain",
-                DiagnosticLog.suggestedFileName(),
-                buildDiagnosticReport()
-            ).toString()
-
-            "restore_full_backup_from_file" -> {
-                val uri = activity.openDocumentBlocking(
-                    arrayOf("application/json", "application/octet-stream", "text/plain")
-                ) ?: return "null"
-                val text = activity.contentResolver.openInputStream(uri)
-                    ?.bufferedReader(StandardCharsets.UTF_8)
-                    ?.use { it.readText() }
+            // Files
+            "export_schedule_json" -> saveTextDocument("application/json", "lumaschedule-schedule.json", transfer.exportScheduleJson()).toString()
+            "export_schedule_ics" -> saveTextDocument("text/calendar", "lumaschedule-schedule.ics", transfer.exportIcs()).toString()
+            "export_full_backup" -> saveTextDocument("application/json", "lumaschedule-${backupDate()}.luma.json", transfer.exportFullBackup(BuildConfig.VERSION_NAME)).toString()
+            "export_diagnostics" -> saveTextDocument("text/plain", DiagnosticLog.suggestedFileName(), diagnosticReport()).toString()
+            "restore_full_backup" -> {
+                val uri = activity.openDocumentBlocking(arrayOf("application/json", "application/octet-stream", "text/plain")) ?: return NULL
+                val text = activity.contentResolver.openInputStream(uri)?.bufferedReader(StandardCharsets.UTF_8)?.use { it.readText() }
                     ?: error("无法读取备份文件。")
-                val summary = transfer.restoreFullBackup(text)
-                resyncRemindersIfEnabled()
-                summary.toString()
+                changed { transfer.restoreFullBackup(text) }.toString()
             }
 
-            "get_webdav_profile" -> {
-                database.getSettingRaw(WEB_DAV_PROFILE_KEY)
-                    ?: JSONObject()
-                        .put("baseUrl", "")
-                        .put("username", "")
-                        .put("remotePath", "LumaSchedule/lumaschedule-latest.luma.json")
-                        .toString()
-            }
-
-            "save_webdav_profile" -> {
-                val profile = sanitizeWebDavProfile(args.getJSONObject("profile"))
-                database.setSettingRaw(WEB_DAV_PROFILE_KEY, profile.toString())
-                "null"
-            }
-
-            "webdav_test" -> webDav
-                .test(args.getJSONObject("credentials"))
-                .toString()
-
-            "webdav_upload_backup" -> {
-                val credentials = args.getJSONObject("credentials")
+            // WebDAV
+            "get_webdav_profile" -> (database.getSettingRaw(WEB_DAV_PROFILE_KEY)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: sanitizeWebDavProfile(JSONObject())).toString()
+            "save_webdav_profile" -> database.setSettingRaw(WEB_DAV_PROFILE_KEY, sanitizeWebDavProfile(args.getJSONObject("profile")).toString()).let { NULL }
+            "webdav_test" -> webDav.test(args.getJSONObject("credentials")).toString()
+            "webdav_upload" -> {
                 val backup = transfer.exportFullBackup(BuildConfig.VERSION_NAME)
-                val result = webDav.upload(credentials, backup)
-                result.put("backup", transfer.backupSummary(backup)).toString()
+                webDav.upload(args.getJSONObject("credentials"), backup).put("backup", transfer.backupSummary(backup)).toString()
             }
-
-            "webdav_restore_backup" -> {
-                val credentials = args.getJSONObject("credentials")
-                val (result, backup) = webDav.download(credentials)
+            "webdav_restore" -> {
+                val (result, backup) = webDav.download(args.getJSONObject("credentials"))
                 if (!result.optBoolean("ok") || backup == null) return result.toString()
-                val summary = transfer.restoreFullBackup(backup)
-                resyncRemindersIfEnabled()
-                result
-                    .put("message", "云端完整备份已恢复。")
-                    .put("backup", summary)
-                    .toString()
+                val summary = changed { transfer.restoreFullBackup(backup) }
+                result.put("message", "已从云端恢复：${summary.optInt("courseCount")} 门课程。").put("backup", summary).toString()
             }
 
-            else -> error("Native command not implemented yet: $command")
+            else -> error("未知的原生命令：$command")
         }
     }
 
-    private fun buildDiagnosticReport(): String {
-        val schedule = runCatching { database.getScheduleSnapshot() }.getOrNull()
-        val grades = runCatching { database.getGradeSnapshot() }.getOrNull()
-        val reminderEnabled = database.getSettingRaw("reminders.course.default")
-            ?.let { runCatching { JSONObject(it).optBoolean("enabled", false) }.getOrDefault(false) }
-            ?: false
-        val summary = JSONObject()
-            .put("databaseReady", true)
-            .put("hasSchedule", schedule?.optBoolean("hasSchedule", false) ?: false)
-            .put("courseCount", schedule?.optJSONArray("courses")?.length() ?: -1)
-            .put("gradeRecordCount", grades?.optJSONArray("records")?.length() ?: -1)
-            .put("reminderEnabled", reminderEnabled)
-        return DiagnosticLog.buildReport(activity, BuildConfig.VERSION_NAME, uiReadyMs, summary)
+    /** Runs a schedule mutation, then keeps reminders and the widget in step with it. */
+    private fun <T> changed(block: () -> T): T {
+        val result = block()
+        runCatching { if (database.remindersEnabled()) reminders.sync() }
+            .onFailure { DiagnosticLog.record(activity, "WARN", "reminders.resync_failed", it.message.orEmpty()) }
+        runCatching { NextCourseWidgetProvider.updateAll(activity) }
+        return result
     }
 
-    private fun courseCreditIndex(): JSONObject = database.getSettingRaw(COURSE_CREDIT_INDEX_KEY)
-        ?.let { runCatching { JSONObject(it) }.getOrNull() }
-        ?: JSONObject()
+    private fun diagnosticReport(): String =
+        DiagnosticLog.buildReport(activity, BuildConfig.VERSION_NAME, uiReadyMs, runCatching { database.diagnosticSummary() }.getOrElse { JSONObject() })
 
-    private fun normalizedCourseName(raw: String): String = raw
-        .trim()
-        .filterNot { it.isWhitespace() }
-        .lowercase()
-
-    private fun courseCreditFrom(input: JSONObject): Double? {
-        if (!input.has("credit") || input.isNull("credit")) return null
-        val value = when (val raw = input.opt("credit")) {
-            is Number -> raw.toDouble()
-            else -> raw?.toString()?.trim()?.toDoubleOrNull()
-        }
-        return value?.takeIf { it.isFinite() && it in 0.0..30.0 }
+    private fun sendTestNotification(): Boolean {
+        if (!activity.ensureNotificationPermissionBlocking()) return false
+        ReminderReceiver.notify(activity, 1001, "LumaSchedule · 测试通知", "通知工作正常，上课提醒会以这样的方式出现。")
+        return true
     }
-
-    private fun saveCourseCredit(meetingId: String, course: JSONObject) {
-        val index = courseCreditIndex()
-        val metaKey = "$COURSE_CREDIT_META_PREFIX$meetingId"
-        val previous = database.getSettingRaw(metaKey)
-            ?.let { runCatching { JSONObject(it) }.getOrNull() }
-        val previousName = normalizedCourseName(previous?.optString("name").orEmpty())
-        if (previousName.isNotBlank()) index.remove(previousName)
-
-        val credit = courseCreditFrom(course)
-        val name = course.optString("name").trim()
-        val normalizedName = normalizedCourseName(name)
-        if (credit != null && normalizedName.isNotBlank()) {
-            index.put(normalizedName, credit)
-            database.setSettingRaw(
-                metaKey,
-                JSONObject().put("name", name).put("credit", credit).toString()
-            )
-        } else {
-            database.setSettingRaw(metaKey, "null")
-        }
-        database.setSettingRaw(COURSE_CREDIT_INDEX_KEY, index.toString())
-    }
-
-    private fun forgetCourseCredit(meetingId: String) {
-        val metaKey = "$COURSE_CREDIT_META_PREFIX$meetingId"
-        val previous = database.getSettingRaw(metaKey)
-            ?.let { runCatching { JSONObject(it) }.getOrNull() }
-        val previousName = normalizedCourseName(previous?.optString("name").orEmpty())
-        if (previousName.isNotBlank()) {
-            val index = courseCreditIndex()
-            index.remove(previousName)
-            database.setSettingRaw(COURSE_CREDIT_INDEX_KEY, index.toString())
-        }
-        database.setSettingRaw(metaKey, "null")
-    }
-
-    private fun withCourseCredits(snapshot: JSONObject): JSONObject {
-        val index = courseCreditIndex()
-        val courses = snapshot.optJSONArray("courses") ?: return snapshot
-        for (position in 0 until courses.length()) {
-            val course = courses.optJSONObject(position) ?: continue
-            val key = normalizedCourseName(course.optString("name"))
-            val credit = if (key.isNotBlank() && index.has(key)) index.optDouble(key, Double.NaN) else Double.NaN
-            course.put("credit", if (credit.isFinite()) credit else JSONObject.NULL)
-        }
-        return snapshot
-    }
-
-    private fun withScheduleCreditFallback(snapshot: JSONObject): JSONObject {
-        val index = courseCreditIndex()
-        val records = snapshot.optJSONArray("records") ?: return snapshot
-        for (position in 0 until records.length()) {
-            val record = records.optJSONObject(position) ?: continue
-            if (record.has("credit") && !record.isNull("credit")) continue
-            val key = normalizedCourseName(record.optString("courseName"))
-            val credit = if (key.isNotBlank() && index.has(key)) index.optDouble(key, Double.NaN) else Double.NaN
-            if (credit.isFinite()) record.put("credit", credit)
-        }
-        return snapshot
-    }
-
-    private fun checkUpdate(): JSONObject {
-        val current = BuildConfig.VERSION_NAME.substringBefore('-').removePrefix("v")
-        val connection = (URL(LATEST_RELEASE_API).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 8_000
-            readTimeout = 8_000
-            useCaches = false
-            setRequestProperty("Accept", "application/vnd.github+json")
-            setRequestProperty("User-Agent", "LumaSchedule/$current")
-            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
-        }
-        return try {
-            val code = connection.responseCode
-            if (code !in 200..299) error("检查更新失败（HTTP $code）")
-            val body = connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() }
-            val release = JSONObject(body)
-            val latest = release.optString("tag_name").removePrefix("v").trim()
-            if (latest.isBlank()) error("GitHub Release 没有有效版本号")
-            JSONObject()
-                .put("currentVersion", current)
-                .put("latestVersion", latest)
-                .put("updateAvailable", compareVersions(latest, current) > 0)
-                .put("releaseUrl", release.optString("html_url"))
-                .put("name", release.optString("name"))
-                .put("publishedAt", release.optString("published_at"))
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    private fun compareVersions(left: String, right: String): Int {
-        fun parts(value: String) = value.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
-        val a = parts(left)
-        val b = parts(right)
-        val length = maxOf(a.size, b.size, 3)
-        for (index in 0 until length) {
-            val av = a.getOrElse(index) { 0 }
-            val bv = b.getOrElse(index) { 0 }
-            if (av != bv) return av.compareTo(bv)
-        }
-        return 0
-    }
-
-    private fun validWeekendMode(value: String): Boolean = value in setOf("auto", "weekdays", "sat", "sun", "both")
 
     private fun saveTextDocument(mimeType: String, suggestedName: String, text: String): Boolean {
         val uri = activity.createDocumentBlocking(mimeType, suggestedName) ?: return false
         activity.contentResolver.openOutputStream(uri, "wt")?.use { stream ->
             stream.write(text.toByteArray(StandardCharsets.UTF_8))
             stream.flush()
-        } ?: error("无法写入选择的文件。")
+        } ?: error("无法写入所选文件。")
         return true
     }
+
+    private fun backupDate(): String = java.time.LocalDate.now().toString()
 
     private fun sanitizeWebDavProfile(input: JSONObject): JSONObject = JSONObject()
         .put("baseUrl", input.optString("baseUrl").trim())
         .put("username", input.optString("username").trim())
-        .put(
-            "remotePath",
-            input.optString("remotePath", "LumaSchedule/lumaschedule-latest.luma.json").trim()
-                .ifBlank { "LumaSchedule/lumaschedule-latest.luma.json" }
-        )
+        .put("remotePath", input.optString("remotePath").trim().ifBlank { "LumaSchedule/lumaschedule-latest.luma.json" })
 
-    fun refreshRemindersFromLifecycle() {
-        executor.execute {
-            runCatching { resyncRemindersIfEnabled() }
-                .onFailure {
-                    DiagnosticLog.record(
-                        activity.applicationContext,
-                        "WARN",
-                        "reminders.lifecycle_resync_failed",
-                        it.message.orEmpty()
-                    )
+    // ------------------------------------------------------------------ updates
+
+    private fun checkUpdate(): JSONObject {
+        val current = BuildConfig.VERSION_NAME.removePrefix("v").trim()
+        val includePrerelease = current.contains('-')
+        val connection = (URL(RELEASES_API).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 8_000
+            readTimeout = 10_000
+            useCaches = false
+            setRequestProperty("Accept", "application/vnd.github+json")
+            setRequestProperty("User-Agent", "LumaSchedule/$current")
+            setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+        }
+        try {
+            val code = connection.responseCode
+            if (code !in 200..299) error("检查更新失败（HTTP $code）")
+            val releases = JSONArray(connection.inputStream.bufferedReader(StandardCharsets.UTF_8).use { it.readText() })
+            var best: JSONObject? = null
+            var bestVersion = ""
+            for (index in 0 until releases.length()) {
+                val release = releases.optJSONObject(index) ?: continue
+                if (release.optBoolean("draft")) continue
+                if (release.optBoolean("prerelease") && !includePrerelease) continue
+                val version = release.optString("tag_name").removePrefix("v").trim()
+                if (!version.matches(VERSION_PATTERN)) continue
+                if (best == null || compareVersions(version, bestVersion) > 0) {
+                    best = release
+                    bestVersion = version
                 }
-        }
-    }
-
-    private fun resyncRemindersIfEnabled() {
-        val enabled = database.getSettingRaw("reminders.course.default")
-            ?.let { runCatching { JSONObject(it).optBoolean("enabled", false) }.getOrDefault(false) }
-            ?: false
-        if (enabled) runCatching { reminderEngine.sync() }
-    }
-
-    private fun updateWidget(snapshot: JSONObject): Boolean {
-        val prefs = activity.getSharedPreferences("luma_widget", Context.MODE_PRIVATE)
-        prefs.edit()
-            .putString("next_course_name", snapshot.optString("courseName", "暂无课程"))
-            .putString(
-                "next_course_meta",
-                snapshot.optString("courseMeta", "打开 LumaSchedule 查看课表")
-            )
-            .putString("next_course_countdown", snapshot.optString("countdown", "--"))
-            .apply()
-
-        val manager = AppWidgetManager.getInstance(activity)
-        val component = ComponentName(activity, NextCourseWidgetProvider::class.java)
-        val ids = manager.getAppWidgetIds(component)
-        if (ids.isNotEmpty()) {
-            activity.sendBroadcast(
-                Intent(AppWidgetManager.ACTION_APPWIDGET_UPDATE).apply {
-                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_IDS, ids)
-                    this.component = component
-                }
-            )
-        }
-        return true
-    }
-
-    private fun sendTestNotification(): Boolean {
-        if (!activity.ensureNotificationPermissionBlocking()) return false
-        ReminderReceiver().onReceive(
-            activity,
-            Intent(activity, ReminderReceiver::class.java).apply {
-                putExtra(ReminderReceiver.EXTRA_NOTIFICATION_ID, 1001)
-                putExtra(ReminderReceiver.EXTRA_TITLE, "LumaSchedule")
-                putExtra(
-                    ReminderReceiver.EXTRA_BODY,
-                    "测试通知发送成功。课程提醒可以正常显示。"
-                )
             }
-        )
-        return true
-    }
-
-    private fun scheduleReminder(reminder: JSONObject): Boolean {
-        if (!activity.ensureNotificationPermissionBlocking()) return false
-        val id = reminder.getInt("id")
-        val triggerAt = reminder.getLong("triggerAtEpochMs")
-        if (triggerAt <= System.currentTimeMillis()) return false
-        val title = reminder.optString("title", "课程提醒")
-        val body = reminder.optString("body", "下一节课即将开始")
-        val pending = PendingIntent.getBroadcast(
-            activity,
-            id,
-            Intent(activity, ReminderReceiver::class.java).apply {
-                putExtra(ReminderReceiver.EXTRA_NOTIFICATION_ID, id)
-                putExtra(ReminderReceiver.EXTRA_TITLE, title)
-                putExtra(ReminderReceiver.EXTRA_BODY, body)
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val manager = activity.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val scheduled = runCatching {
-            if (activity.canScheduleExactAlarms()) {
-                manager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-            } else {
-                manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-            }
-        }.recoverCatching {
-            manager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-        }.isSuccess
-        if (!scheduled) return false
-        DiagnosticLog.record(
-            activity.applicationContext,
-            "INFO",
-            "reminders.test_scheduled",
-            "id=" + id + " triggerAt=" + triggerAt + " exact=" + activity.canScheduleExactAlarms()
-        )
-        val stored = JSONObject()
-            .put("id", id)
-            .put("triggerAtEpochMs", triggerAt)
-            .put("title", title)
-            .put("body", body)
-        activity.getSharedPreferences(BootReceiver.PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(BootReceiver.key(id), stored.toString())
-            .apply()
-        return true
-    }
-
-    private fun cancelReminder(id: Int): Boolean {
-        val pending = PendingIntent.getBroadcast(
-            activity,
-            id,
-            Intent(activity, ReminderReceiver::class.java),
-            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-        )
-        if (pending != null) {
-            val manager = activity.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            manager.cancel(pending)
-            pending.cancel()
+            val latest = best ?: error("GitHub 上还没有发布版本")
+            return JSONObject()
+                .put("currentVersion", current)
+                .put("latestVersion", bestVersion)
+                .put("updateAvailable", compareVersions(bestVersion, current) > 0)
+                .put("releaseUrl", latest.optString("html_url"))
+                .put("name", latest.optString("name"))
+                .put("publishedAt", latest.optString("published_at"))
+        } finally {
+            connection.disconnect()
         }
-        activity.getSharedPreferences(BootReceiver.PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .remove(BootReceiver.key(id))
-            .apply()
-        return true
+    }
+
+    /** Semantic-version comparison: 0.1.5 > 0.1.5-beta.4 > 0.1.5-beta.3. */
+    private fun compareVersions(left: String, right: String): Int {
+        fun split(value: String): Pair<List<Int>, List<String>> {
+            val core = value.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+            val pre = if ('-' in value) value.substringAfter('-').split('.') else emptyList()
+            return core to pre
+        }
+        val (leftCore, leftPre) = split(left)
+        val (rightCore, rightPre) = split(right)
+        for (index in 0 until maxOf(leftCore.size, rightCore.size, 3)) {
+            val difference = leftCore.getOrElse(index) { 0 }.compareTo(rightCore.getOrElse(index) { 0 })
+            if (difference != 0) return difference
+        }
+        if (leftPre.isEmpty() || rightPre.isEmpty()) return rightPre.size.compareTo(0) - leftPre.size.compareTo(0)
+        for (index in 0 until maxOf(leftPre.size, rightPre.size)) {
+            val a = leftPre.getOrNull(index) ?: return -1
+            val b = rightPre.getOrNull(index) ?: return 1
+            val difference = when {
+                a.toIntOrNull() != null && b.toIntOrNull() != null -> a.toInt().compareTo(b.toInt())
+                a.toIntOrNull() != null -> -1
+                b.toIntOrNull() != null -> 1
+                else -> a.compareTo(b)
+            }
+            if (difference != 0) return difference
+        }
+        return 0
     }
 
     private fun resolve(id: String, ok: Boolean, payload: String) {
-        val script = "window.__lumaNativeResolve(${JSONObject.quote(id)},${if (ok) "true" else "false"},${JSONObject.quote(payload)});"
-        activity.runOnUiThread { webView.evaluateJavascript(script, null) }
+        val script = "window.__lumaNativeResolve&&window.__lumaNativeResolve(${JSONObject.quote(id)},$ok,${JSONObject.quote(payload)});"
+        activity.runOnUiThread { if (!activity.isDestroyed) webView.evaluateJavascript(script, null) }
     }
 
     companion object {
+        private const val NULL = "null"
         private const val WEB_DAV_PROFILE_KEY = "sync.webdav.profile"
-        private const val WEEKEND_MODE_KEY = "schedule.weekend_mode"
-        private const val COURSE_CREDIT_INDEX_KEY = "course.credit.index"
-        private const val COURSE_CREDIT_META_PREFIX = "course.credit.meta."
-        private const val LATEST_RELEASE_API = "https://api.github.com/repos/Junyxor/LumaSchedule/releases/latest"
+        private const val RELEASES_API = "https://api.github.com/repos/Junyxor/LumaSchedule/releases?per_page=20"
+        private val VERSION_PATTERN = Regex("^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$")
     }
 }

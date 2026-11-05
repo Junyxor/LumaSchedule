@@ -4,226 +4,201 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.database.sqlite.SQLiteDatabase
 import android.os.Build
 import com.lumaschedule.app.DiagnosticLog
-import com.lumaschedule.app.widgets.BootReceiver
+import com.lumaschedule.app.data.LumaDatabase
+import com.lumaschedule.app.data.ScheduleMath
 import com.lumaschedule.app.widgets.ReminderReceiver
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
-import java.time.LocalDate
+import java.time.Duration
 import java.time.LocalDateTime
-import java.time.LocalTime
-import java.time.ZoneId
+import java.time.ZonedDateTime
 
-class CourseReminderEngine(private val context: Context) {
-    private val dbFile = File(context.filesDir, "lumaschedule.sqlite")
-    private val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+/**
+ * Keeps a rolling window of course reminders armed in AlarmManager.
+ *
+ * Only the next [HORIZON_DAYS] days are scheduled (capped at [MAX_ALARMS]) so a
+ * full semester never hits Android's ~500 alarms-per-app limit. The window is
+ * refreshed whenever a reminder fires, on boot/update/time change, when the app
+ * opens, and by a low-priority maintenance alarm. Scheduled ids live in
+ * SharedPreferences rather than SQLite so restoring a backup from another
+ * device can never orphan alarms that are armed on this one.
+ */
+class CourseReminderEngine(context: Context) {
+    private val context = context.applicationContext
+    private val database = LumaDatabase.get(this.context)
+    private val alarmManager = this.context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+    private val prefs = this.context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    fun sync(): JSONObject {
-        if (!dbFile.exists()) return report(false, 0, 0, 0, 0)
-        val db = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE)
-        try {
-            val settings = readSetting(db, SETTINGS_KEY)?.let { runCatching { JSONObject(it) }.getOrNull() }
-                ?: JSONObject().put("enabled", false).put("offsetMinutes", 15)
-            val enabled = settings.optBoolean("enabled", false)
-            val offset = settings.optInt("offsetMinutes", 15).coerceIn(0, 180)
-            val previous = readIds(db)
+    /** Receivers and the bridge each create an engine, so serialise on a process-wide lock. */
+    fun sync(): JSONObject = synchronized(LOCK) { syncLocked() }
 
-            if (!enabled) {
-                val cancelled = previous.count { cancel(it) }
-                saveIds(db, emptyList())
-                return report(false, 0, 0, cancelled, 0)
+    private fun syncLocked(): JSONObject {
+        cleanUpLegacyAlarms()
+        val settings = database.reminderSettings()
+        val enabled = settings.optBoolean("enabled", false)
+        val offset = settings.optInt("offsetMinutes", 15)
+        val previous = trackedIds()
+
+        if (!enabled) {
+            previous.forEach(::cancel)
+            saveTracked(emptySet())
+            cancelMaintenance()
+            return report(false, 0, 0, previous.size, 0, 0, null)
+        }
+
+        val source = database.calendarSource()
+        if (source == null || source.termStart == null) {
+            previous.forEach(::cancel)
+            saveTracked(emptySet())
+            scheduleMaintenance()
+            return report(true, 0, 0, previous.size, 0, 0, if (source == null) "noSchedule" else "missingTermStart")
+        }
+
+        val now = ZonedDateTime.now(source.zone)
+        val horizon = now.plusDays(HORIZON_DAYS)
+        val resolver = ScheduleMath.TimeResolver(source.slots, source.meetings)
+        val desired = ArrayList<Reminder>()
+        var untimed = 0
+        for (meeting in source.meetings) {
+            val range = resolver.resolve(meeting)
+            if (range == null) {
+                untimed++
+                continue
             }
-
-            val schedule = latestScheduleContext(db)
-                ?: return report(true, 0, 0, previous.count { cancel(it) }, 0).also { saveIds(db, emptyList()) }
-            val termStart = parseDate(schedule.startDate)
-                ?: throw IllegalStateException("课表缺少有效的学期开始日期，暂时无法自动安排课程提醒。")
-            val zone = ZoneId.of(schedule.timezone.ifBlank { "Asia/Shanghai" })
-            val nowMs = System.currentTimeMillis()
-            val desired = LinkedHashMap<Int, NativeReminder>()
-            var skipped = 0
-
-            db.rawQuery(
-                "SELECT m.id, c.name, COALESCE(c.teacher,''), COALESCE(m.location,''), m.weekday, m.start_section, COALESCE(m.start_time,''), m.weeks_mask " +
-                    "FROM courses c JOIN course_meetings m ON m.course_id=c.id WHERE c.schedule_id=? ORDER BY m.weekday,m.start_section,c.name",
-                arrayOf(schedule.scheduleId)
-            ).use { cursor ->
-                while (cursor.moveToNext()) {
-                    val meetingId = cursor.getString(0)
-                    val courseName = cursor.getString(1)
-                    val teacher = cursor.getString(2)
-                    val room = cursor.getString(3)
-                    val weekday = cursor.getInt(4)
-                    val startSection = cursor.getInt(5)
-                    val explicitStart = cursor.getString(6)
-                    val mask = cursor.getLong(7)
-                    val startText = explicitStart.takeIf { it.isNotBlank() } ?: resolveSlot(schedule.sectionsJson, startSection)
-                    val startTime = startText?.let(::parseTime)
-                    if (startTime == null || weekday !in 1..7) {
-                        skipped++
-                        continue
-                    }
-                    val weeks = weeksFromMask(mask, schedule.weekCount)
-                    for (week in weeks) {
-                        val date = termStart.plusDays(((week - 1) * 7L) + weekday - 1L)
-                        val startAt = LocalDateTime.of(date, startTime).atZone(zone).toInstant().toEpochMilli()
-                        val triggerAt = startAt - offset * 60_000L
-                        if (triggerAt <= nowMs) {
-                            skipped++
-                            continue
+            var date = now.toLocalDate()
+            while (!date.isAfter(horizon.toLocalDate())) {
+                if (ScheduleMath.weekdayOf(date) == meeting.day) {
+                    val week = ScheduleMath.teachingWeek(date, source.termStart, source.weekStartsOn)
+                    if (week in 1..source.weekCount && ScheduleMath.inWeek(meeting.weeksMask, week)) {
+                        val startAt = LocalDateTime.of(date, range.start).atZone(source.zone)
+                        val triggerAt = startAt.minusMinutes(offset.toLong())
+                        if (triggerAt.isAfter(now) && !triggerAt.isAfter(horizon)) {
+                            desired += Reminder(
+                                id = stableId("${meeting.id}|$date|${range.start}|$offset"),
+                                triggerAtMs = triggerAt.toInstant().toEpochMilli(),
+                                title = title(meeting.name, offset),
+                                body = body(meeting, range, week)
+                            )
                         }
-                        val id = stableId("$meetingId|$week|$startText|$offset|$courseName|$room|$teacher|$weekday")
-                        var body = "$startText · 第 $week 周"
-                        if (room.isNotBlank()) body += " · $room"
-                        if (teacher.isNotBlank()) body += " · $teacher"
-                        desired[id] = NativeReminder(id, triggerAt, "上课提醒 · $courseName", body)
                     }
                 }
+                date = date.plusDays(1)
             }
-
-            val desiredIds = desired.keys.toSet()
-            val previousIds = previous.toSet()
-            val stale = previousIds - desiredIds
-            val cancelled = stale.count { cancel(it) }
-
-            // Re-arm every future reminder on each sync. Android/OEM battery policies,
-            // force-stop, exact-alarm permission changes, or package updates can remove
-            // alarms while our persisted ID list still exists.
-            var scheduled = 0
-            desired.values.forEach { reminder ->
-                if (schedule(reminder)) scheduled++
-            }
-
-            saveIds(db, desiredIds.sorted())
-            val exact = canScheduleExactAlarms()
-            DiagnosticLog.record(
-                context,
-                "INFO",
-                "reminders.sync",
-                "future=" + desiredIds.size + " scheduled=" + scheduled + " cancelled=" + cancelled + " skipped=" + skipped + " exact=" + exact
-            )
-            return report(true, desiredIds.size, scheduled, cancelled, skipped)
-                .put("exactAlarmGranted", exact)
-        } finally {
-            db.close()
         }
-    }
-
-    private fun latestScheduleContext(db: SQLiteDatabase): ScheduleContext? = db.rawQuery(
-        "SELECT s.id,t.start_date,t.week_count,COALESCE(t.timezone,'Asia/Shanghai'),COALESCE(ts.sections_json,'') " +
-            "FROM schedules s JOIN terms t ON t.id=s.term_id LEFT JOIN time_schemes ts ON ts.id=s.time_scheme_id ORDER BY s.rowid DESC LIMIT 1",
-        null
-    ).use { cursor ->
-        if (!cursor.moveToFirst()) null else ScheduleContext(
-            cursor.getString(0), cursor.getString(1), cursor.getInt(2).coerceIn(1, 64), cursor.getString(3), cursor.getString(4)
+        val chosen = desired.sortedBy { it.triggerAtMs }.distinctBy { it.id }.take(MAX_ALARMS)
+        val chosenIds = chosen.map { it.id }.toSet()
+        val stale = previous - chosenIds
+        stale.forEach(::cancel)
+        var scheduled = 0
+        chosen.forEach { if (schedule(it)) scheduled++ }
+        saveTracked(chosenIds)
+        scheduleMaintenance()
+        val exact = canScheduleExactAlarms()
+        DiagnosticLog.record(
+            context,
+            "INFO",
+            "reminders.sync",
+            "future=${chosen.size} scheduled=$scheduled cancelled=${stale.size} untimed=$untimed exact=$exact"
         )
+        return report(true, chosen.size, scheduled, stale.size, 0, untimed, null)
     }
 
-    private fun readSetting(db: SQLiteDatabase, key: String): String? = db.rawQuery(
-        "SELECT value_json FROM settings WHERE key=? LIMIT 1", arrayOf(key)
-    ).use { cursor -> if (cursor.moveToFirst()) cursor.getString(0) else null }
-
-    private fun readIds(db: SQLiteDatabase): List<Int> {
-        val raw = readSetting(db, IDS_KEY) ?: return emptyList()
-        val array = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
-        return (0 until array.length()).mapNotNull { array.optInt(it).takeIf { id -> id > 0 } }
+    /** One-off notification a minute from now, used by Settings to verify background delivery. */
+    fun scheduleTest(delayMs: Long): Boolean {
+        val reminder = Reminder(TEST_ID, System.currentTimeMillis() + delayMs.coerceIn(5_000L, 3_600_000L), "LumaSchedule · 测试提醒", "后台提醒工作正常，上课前会这样通知你。")
+        return schedule(reminder)
     }
 
-    private fun saveIds(db: SQLiteDatabase, ids: List<Int>) {
-        db.execSQL(
-            "INSERT INTO settings(key,value_json) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json",
-            arrayOf(IDS_KEY, JSONArray(ids).toString())
-        )
-    }
+    private fun title(name: String, offset: Int) = if (offset <= 0) "$name · 现在上课" else "$name · ${offset} 分钟后上课"
 
-    private fun schedule(reminder: NativeReminder): Boolean {
+    private fun body(meeting: ScheduleMath.Meeting, range: ScheduleMath.TimeRange, week: Int): String = buildList {
+        add(if (range.end != null) "${range.start}–${range.end}" else "${range.start} 开始")
+        if (meeting.room.isNotBlank()) add(meeting.room)
+        if (meeting.teacher.isNotBlank()) add(meeting.teacher)
+        add("第 $week 周")
+    }.joinToString(" · ")
+
+    private fun schedule(reminder: Reminder): Boolean {
         val pending = PendingIntent.getBroadcast(
             context,
             reminder.id,
             Intent(context, ReminderReceiver::class.java).apply {
+                action = ReminderReceiver.ACTION_REMIND
                 putExtra(ReminderReceiver.EXTRA_NOTIFICATION_ID, reminder.id)
                 putExtra(ReminderReceiver.EXTRA_TITLE, reminder.title)
                 putExtra(ReminderReceiver.EXTRA_BODY, reminder.body)
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val exact = canScheduleExactAlarms()
         val scheduled = runCatching {
-            if (exact) {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAt, pending)
+            if (canScheduleExactAlarms()) {
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAtMs, pending)
             } else {
-                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAt, pending)
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAtMs, pending)
             }
         }.recoverCatching {
-            // Permission state can change between the capability check and scheduling.
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAt, pending)
+            // The exact-alarm permission can be revoked between the check and the call.
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, reminder.triggerAtMs, pending)
         }.isSuccess
-        if (!scheduled) {
-            DiagnosticLog.record(context, "WARN", "reminders.schedule_failed", "id=" + reminder.id)
-            return false
-        }
-        val stored = JSONObject()
-            .put("id", reminder.id)
-            .put("triggerAtEpochMs", reminder.triggerAt)
-            .put("title", reminder.title)
-            .put("body", reminder.body)
-        context.getSharedPreferences(BootReceiver.PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().putString(BootReceiver.key(reminder.id), stored.toString()).apply()
-        return true
+        if (!scheduled) DiagnosticLog.record(context, "WARN", "reminders.schedule_failed", "id=${reminder.id}")
+        return scheduled
     }
 
-    private fun cancel(id: Int): Boolean {
-        val pending = PendingIntent.getBroadcast(
-            context,
-            id,
-            Intent(context, ReminderReceiver::class.java),
-            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
-        )
-        if (pending != null) {
+    private fun cancel(id: Int) {
+        // Builds before the rolling window registered alarms without an action; cancel both shapes.
+        for (action in listOf(ReminderReceiver.ACTION_REMIND, null)) {
+            val intent = Intent(context, ReminderReceiver::class.java).apply { if (action != null) this.action = action }
+            PendingIntent.getBroadcast(context, id, intent, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE)?.let { pending ->
+                alarmManager.cancel(pending)
+                pending.cancel()
+            }
+        }
+    }
+
+    private fun scheduleMaintenance() {
+        val pending = maintenanceIntent(PendingIntent.FLAG_UPDATE_CURRENT) ?: return
+        val at = System.currentTimeMillis() + Duration.ofDays(MAINTENANCE_DAYS).toMillis()
+        runCatching { alarmManager.set(AlarmManager.RTC, at, pending) }
+    }
+
+    private fun cancelMaintenance() {
+        maintenanceIntent(PendingIntent.FLAG_NO_CREATE)?.let { pending ->
             alarmManager.cancel(pending)
             pending.cancel()
         }
-        context.getSharedPreferences(BootReceiver.PREFS_NAME, Context.MODE_PRIVATE)
-            .edit().remove(BootReceiver.key(id)).apply()
-        return true
     }
 
-    private fun weeksFromMask(mask: Long, weekCount: Int): List<Int> {
-        if (mask == 0L) return (1..weekCount).toList()
-        return (1..weekCount).filter { week -> (mask and (1L shl (week - 1))) != 0L }
+    private fun maintenanceIntent(flag: Int): PendingIntent? = PendingIntent.getBroadcast(
+        context,
+        MAINTENANCE_REQUEST,
+        Intent(context, ReminderReceiver::class.java).setAction(ReminderReceiver.ACTION_MAINTAIN),
+        flag or PendingIntent.FLAG_IMMUTABLE
+    )
+
+    private fun trackedIds(): Set<Int> = prefs.getStringSet(KEY_IDS, emptySet()).orEmpty().mapNotNull { it.toIntOrNull() }.toSet()
+
+    private fun saveTracked(ids: Set<Int>) {
+        prefs.edit().putStringSet(KEY_IDS, ids.map(Int::toString).toSet()).apply()
     }
 
-    private fun resolveSlot(raw: String, section: Int): String? {
-        if (raw.isBlank()) return null
-        val root: Any = runCatching { if (raw.trim().startsWith("[")) JSONArray(raw) else JSONObject(raw) }.getOrNull() ?: return null
-        val slots = when (root) {
-            is JSONArray -> root
-            is JSONObject -> root.optJSONArray("timeSlots") ?: root.optJSONArray("slots") ?: root.optJSONArray("sections")
-            else -> null
-        } ?: return null
-        for (i in 0 until slots.length()) {
-            val slot = slots.optJSONObject(i) ?: continue
-            val number = slot.optInt("number", slot.optInt("section", slot.optInt("index", -1)))
-            if (number != section) continue
-            for (key in arrayOf("startTime", "start_time", "start")) {
-                slot.optString(key).trim().takeIf { it.isNotEmpty() }?.let { return it }
-            }
+    /** Cancels alarms armed by builds that tracked ids in SQLite and the old boot-restore preferences. */
+    private fun cleanUpLegacyAlarms() {
+        if (prefs.getBoolean(KEY_LEGACY_DONE, false)) return
+        val ids = HashSet<Int>()
+        database.getSettingRaw(LEGACY_IDS_KEY)?.let { raw ->
+            runCatching { JSONArray(raw) }.getOrNull()?.let { array -> for (index in 0 until array.length()) array.optInt(index).takeIf { it != 0 }?.let(ids::add) }
         }
-        return null
+        val legacy = context.getSharedPreferences(LEGACY_PREFS, Context.MODE_PRIVATE)
+        legacy.all.keys.forEach { key -> key.removePrefix("reminder_").toIntOrNull()?.let(ids::add) }
+        ids.forEach(::cancel)
+        legacy.edit().clear().apply()
+        database.setSettingRaw(LEGACY_IDS_KEY, "[]")
+        prefs.edit().putBoolean(KEY_LEGACY_DONE, true).apply()
     }
 
-    private fun parseDate(raw: String): LocalDate? {
-        val normalized = raw.trim().take(10).replace('/', '-').replace('.', '-')
-        return runCatching { LocalDate.parse(normalized) }.getOrNull()
-    }
-
-    private fun parseTime(raw: String): LocalTime? = runCatching {
-        val text = raw.trim()
-        if (text.length >= 5) LocalTime.parse(text.take(5)) else null
-    }.getOrNull()
+    fun canScheduleExactAlarms(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
 
     private fun stableId(seed: String): Int {
         var hash = 0x811c9dc5u
@@ -235,29 +210,30 @@ class CourseReminderEngine(private val context: Context) {
         return if (id == 0) 1 else id
     }
 
-    private fun canScheduleExactAlarms(): Boolean =
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
-
-    private fun report(enabled: Boolean, future: Int, scheduled: Int, cancelled: Int, skipped: Int) = JSONObject()
+    private fun report(enabled: Boolean, future: Int, scheduled: Int, cancelled: Int, skipped: Int, untimed: Int, problem: String?) = JSONObject()
         .put("enabled", enabled)
         .put("futureCount", future)
         .put("scheduledCount", scheduled)
         .put("cancelledCount", cancelled)
         .put("skippedCount", skipped)
+        .put("untimedCount", untimed)
+        .put("horizonDays", HORIZON_DAYS)
+        .put("problem", problem ?: JSONObject.NULL)
         .put("exactAlarmGranted", canScheduleExactAlarms())
 
-    private data class ScheduleContext(
-        val scheduleId: String,
-        val startDate: String,
-        val weekCount: Int,
-        val timezone: String,
-        val sectionsJson: String
-    )
-
-    private data class NativeReminder(val id: Int, val triggerAt: Long, val title: String, val body: String)
+    private data class Reminder(val id: Int, val triggerAtMs: Long, val title: String, val body: String)
 
     companion object {
-        private const val SETTINGS_KEY = "reminders.course.default"
-        private const val IDS_KEY = "reminders.course.native_ids"
+        private val LOCK = Any()
+        const val HORIZON_DAYS = 14L
+        private const val MAX_ALARMS = 160
+        private const val MAINTENANCE_DAYS = 2L
+        private const val MAINTENANCE_REQUEST = -4100
+        const val TEST_ID = -1002
+        private const val PREFS_NAME = "luma_reminder_engine"
+        private const val KEY_IDS = "scheduled_ids"
+        private const val KEY_LEGACY_DONE = "legacy_cleanup_done"
+        private const val LEGACY_PREFS = "luma_reminders"
+        private const val LEGACY_IDS_KEY = "reminders.course.native_ids"
     }
 }

@@ -1,67 +1,41 @@
 package com.lumaschedule.app.widgets
 
 import android.app.AlarmManager
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.os.Build
 import com.lumaschedule.app.DiagnosticLog
-import org.json.JSONObject
+import com.lumaschedule.app.reminders.CourseReminderEngine
 
+/**
+ * Alarms are wiped on reboot and become wrong after clock or time-zone changes.
+ * Rebuild the reminder window and refresh the widget from SQLite instead of
+ * replaying stale copies.
+ */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (
-            intent.action != Intent.ACTION_BOOT_COMPLETED &&
-            intent.action != Intent.ACTION_MY_PACKAGE_REPLACED &&
-            intent.action != AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
-        ) return
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        val editor = prefs.edit()
-        prefs.all.forEach { (key, raw) ->
-            val value = raw as? String ?: return@forEach
-            runCatching {
-                val json = JSONObject(value)
-                val id = json.getInt("id")
-                val triggerAt = json.getLong("triggerAtEpochMs")
-                if (triggerAt <= System.currentTimeMillis()) {
-                    editor.remove(key)
-                    return@runCatching
-                }
-                val pending = PendingIntent.getBroadcast(
-                    context,
-                    id,
-                    Intent(context, ReminderReceiver::class.java).apply {
-                        putExtra(ReminderReceiver.EXTRA_NOTIFICATION_ID, id)
-                        putExtra(ReminderReceiver.EXTRA_TITLE, json.optString("title", "课程提醒"))
-                        putExtra(ReminderReceiver.EXTRA_BODY, json.optString("body", "下一节课即将开始"))
-                    },
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                runCatching {
-                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()) {
-                        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-                    } else {
-                        alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-                    }
-                }.recoverCatching {
-                    alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pending)
-                }.getOrThrow()
-            }.onFailure { editor.remove(key) }
-        }
-        editor.apply()
-        DiagnosticLog.record(
-            context,
-            "INFO",
-            "reminders.restore",
-            "action=" + intent.action + " exact=" +
-                (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms())
-        )
+        if (intent.action !in HANDLED_ACTIONS) return
+        val pending = goAsync()
+        Thread {
+            try {
+                val report = CourseReminderEngine(context).sync()
+                NextCourseWidgetProvider.updateAll(context)
+                DiagnosticLog.record(context, "INFO", "reminders.restore", "action=${intent.action} future=${report.optInt("futureCount")}")
+            } catch (error: Throwable) {
+                DiagnosticLog.record(context, "WARN", "reminders.restore_failed", "action=${intent.action} ${error.message.orEmpty()}")
+            } finally {
+                pending.finish()
+            }
+        }.start()
     }
 
     companion object {
-        const val PREFS_NAME = "luma_reminders"
-        fun key(id: Int) = "reminder_$id"
+        private val HANDLED_ACTIONS = setOf(
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            Intent.ACTION_TIME_CHANGED,
+            Intent.ACTION_TIMEZONE_CHANGED,
+            AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
+        )
     }
 }

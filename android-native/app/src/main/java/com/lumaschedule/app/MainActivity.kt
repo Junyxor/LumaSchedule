@@ -1,19 +1,24 @@
 package com.lumaschedule.app
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlarmManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
 import android.view.View
-import android.view.Window
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -21,18 +26,21 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import com.lumaschedule.app.data.LumaDatabase
-import com.lumaschedule.app.data.WeekScheduleBridge
+import com.lumaschedule.app.widgets.ReminderReceiver
+import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 class MainActivity : Activity() {
+    private lateinit var container: FrameLayout
     private lateinit var webView: WebView
-    private lateinit var database: LumaDatabase
     private lateinit var bridge: LumaBridge
-    private var weekBridge: WeekScheduleBridge? = null
     private val ioExecutor = Executors.newFixedThreadPool(2) { runnable ->
         Thread(runnable, "luma-native-io").apply { priority = Thread.NORM_PRIORITY }
     }
@@ -44,38 +52,185 @@ class MainActivity : Activity() {
     @Volatile private var pickerResult: Uri? = null
     private var webFileChooserCallback: ValueCallback<Array<Uri>>? = null
 
+    /** System bar insets in CSS pixels; the bottom inset is 0 while the keyboard is open. */
+    @Volatile private var cssInsets = IntArray(4) // top, right, bottom, left
+    @Volatile private var webBackEnabled = false
+    private var backCallback: Any? = null
+    private var darkBars = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        configureWindow(window)
-        database = LumaDatabase(this)
-        weekBridge = runCatching { WeekScheduleBridge(this) }.getOrNull()
+        val database = LumaDatabase.get(this)
+        darkBars = when (database.appearance()?.optString("theme")) {
+            "dark" -> true
+            "light" -> false
+            else -> isSystemDark()
+        }
+        configureWindow()
+        container = FrameLayout(this)
         webView = WebView(this)
+        container.addView(webView, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        container.setOnApplyWindowInsetsListener { _, insets ->
+            applyInsets(insets)
+            insets
+        }
+        setContentView(container)
         configureWebView(webView)
-        bridge = LumaBridge(this, webView, database, ioExecutor, launchStarted)
+        bridge = LumaBridge(this, webView, ioExecutor, launchStarted)
         webView.addJavascriptInterface(bridge, "LumaNative")
-        weekBridge?.let { webView.addJavascriptInterface(it, "LumaWeek") }
-        setContentView(webView)
+        ReminderReceiver.ensureChannel(this)
         webView.loadUrl(APP_URL)
     }
 
-    private fun configureWindow(window: Window) {
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = Color.TRANSPARENT
+    // ------------------------------------------------------------------ window & insets
+
+    private fun configureWindow() {
         window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
         @Suppress("DEPRECATION")
-        window.decorView.systemUiVisibility = (
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+        window.statusBarColor = Color.TRANSPARENT
+        @Suppress("DEPRECATION")
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) window.isNavigationBarContrastEnforced = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Implied on Android 15+, still required on Android 11–14.
+            @Suppress("DEPRECATION")
+            window.setDecorFitsSystemWindows(false)
+        } else {
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
-                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
-                View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-            )
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        }
+        applySystemBarColors()
     }
 
+    private fun applySystemBarColors() {
+        val background = if (darkBars) DARK_BACKGROUND else LIGHT_BACKGROUND
+        window.setBackgroundDrawable(ColorDrawable(background))
+        if (::webView.isInitialized) webView.setBackgroundColor(background)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            window.insetsController?.setSystemBarsAppearance(if (darkBars) 0 else mask, mask)
+        } else {
+            @Suppress("DEPRECATION")
+            var flags = window.decorView.systemUiVisibility and
+                (View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR).inv()
+            @Suppress("DEPRECATION")
+            if (!darkBars) flags = flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = flags
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun applyInsets(insets: WindowInsets) {
+        val density = resources.displayMetrics.density
+        val top: Int
+        val left: Int
+        val right: Int
+        val barsBottom: Int
+        val imeBottom: Int
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            top = bars.top
+            left = bars.left
+            right = bars.right
+            barsBottom = bars.bottom
+            imeBottom = insets.getInsets(WindowInsets.Type.ime()).bottom
+        } else {
+            top = insets.systemWindowInsetTop
+            left = insets.systemWindowInsetLeft
+            right = insets.systemWindowInsetRight
+            barsBottom = insets.stableInsetBottom
+            imeBottom = insets.systemWindowInsetBottom
+        }
+        val keyboardOpen = imeBottom > barsBottom + (80 * density).toInt()
+        // Shrinking the WebView above the keyboard lets Chromium scroll focused inputs into view.
+        container.setPadding(0, 0, 0, if (keyboardOpen) imeBottom else 0)
+        cssInsets = intArrayOf(
+            (top / density).toInt(),
+            (right / density).toInt(),
+            if (keyboardOpen) 0 else (barsBottom / density).toInt(),
+            (left / density).toInt()
+        )
+        pushInsets()
+    }
+
+    fun insetsJson(): String = JSONObject()
+        .put("top", cssInsets[0])
+        .put("right", cssInsets[1])
+        .put("bottom", cssInsets[2])
+        .put("left", cssInsets[3])
+        .toString()
+
+    private fun pushInsets() {
+        if (!::webView.isInitialized) return
+        val (top, right, bottom, left) = cssInsets.toList()
+        webView.evaluateJavascript(
+            "(function(s){s.setProperty('--native-inset-top','${top}px');s.setProperty('--native-inset-right','${right}px');" +
+                "s.setProperty('--native-inset-bottom','${bottom}px');s.setProperty('--native-inset-left','${left}px');})(document.documentElement.style);",
+            null
+        )
+    }
+
+    fun isSystemDark(): Boolean =
+        (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+
+    fun setSystemBarsDark(dark: Boolean) = runOnUiThread {
+        if (darkBars == dark) return@runOnUiThread
+        darkBars = dark
+        applySystemBarColors()
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val dark = isSystemDark()
+        if (::webView.isInitialized) {
+            webView.evaluateJavascript("window.dispatchEvent(new CustomEvent('luma-system-theme',{detail:{dark:$dark}}));", null)
+        }
+    }
+
+    // ------------------------------------------------------------------ back navigation
+
+    fun setWebBackEnabled(enabled: Boolean) = runOnUiThread {
+        webBackEnabled = enabled
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) updateBackCallback()
+    }
+
+    @SuppressLint("NewApi")
+    private fun updateBackCallback() {
+        val dispatcher = onBackInvokedDispatcher
+        if (webBackEnabled && backCallback == null) {
+            val callback = OnBackInvokedCallback { dispatchBackToWeb() }
+            dispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback)
+            backCallback = callback
+        } else if (!webBackEnabled && backCallback != null) {
+            runCatching { dispatcher.unregisterOnBackInvokedCallback(backCallback as OnBackInvokedCallback) }
+            backCallback = null
+        }
+    }
+
+    private fun dispatchBackToWeb() {
+        webView.evaluateJavascript("(function(){try{return !!(window.__lumaBack&&window.__lumaBack());}catch(e){return false;}})()") { result ->
+            if (result != "true") moveTaskToBack(true)
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (webBackEnabled && ::webView.isInitialized) dispatchBackToWeb() else {
+            @Suppress("DEPRECATION")
+            super.onBackPressed()
+        }
+    }
+
+    // ------------------------------------------------------------------ WebView
+
+    @SuppressLint("SetJavaScriptEnabled")
     private fun configureWebView(view: WebView) {
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         view.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        view.setBackgroundColor(Color.TRANSPARENT)
+        view.setBackgroundColor(if (darkBars) DARK_BACKGROUND else LIGHT_BACKGROUND)
         view.overScrollMode = View.OVER_SCROLL_NEVER
         view.isVerticalScrollBarEnabled = false
         view.isHorizontalScrollBarEnabled = false
@@ -84,30 +239,30 @@ class MainActivity : Activity() {
         view.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
-            databaseEnabled = false
             allowContentAccess = false
             allowFileAccess = false
-            blockNetworkLoads = false // requests are intercepted below; unknown origins are returned as 403.
+            blockNetworkLoads = false // every request is intercepted below; unknown origins get 403.
             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
             setSupportZoom(false)
             builtInZoomControls = false
             displayZoomControls = false
+            textZoom = 100
             javaScriptCanOpenWindowsAutomatically = false
             mediaPlaybackRequiresUserGesture = true
             cacheMode = WebSettings.LOAD_DEFAULT
             userAgentString = "$userAgentString LumaScheduleNative/${BuildConfig.VERSION_NAME}"
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) safeBrowsingEnabled = true
+            safeBrowsingEnabled = true
         }
 
         view.webChromeClient = object : WebChromeClient() {
-            override fun onShowFileChooser(
-                webView: WebView?,
-                filePathCallback: ValueCallback<Array<Uri>>?,
-                fileChooserParams: FileChooserParams?
-            ): Boolean {
+            override fun onShowFileChooser(webView: WebView?, filePathCallback: ValueCallback<Array<Uri>>?, fileChooserParams: FileChooserParams?): Boolean {
                 webFileChooserCallback?.onReceiveValue(null)
                 webFileChooserCallback = filePathCallback
-                val intent = runCatching { fileChooserParams?.createIntent() }.getOrNull()
+                val intent = runCatching { fileChooserParams?.createIntent() }.getOrNull()?.apply {
+                    // Many file managers grey out `.wakeup_schedule` and `.ics` when filtered by MIME type.
+                    type = "*/*"
+                    removeExtra(Intent.EXTRA_MIME_TYPES)
+                }
                 if (intent == null) {
                     webFileChooserCallback?.onReceiveValue(null)
                     webFileChooserCallback = null
@@ -132,14 +287,6 @@ class MainActivity : Activity() {
                 return true
             }
 
-            @Deprecated("Deprecated in Java")
-            override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                val uri = url?.let(Uri::parse) ?: return true
-                if (isAppUri(uri)) return false
-                if (uri.scheme == "https" || uri.scheme == "http") runCatching { startActivity(Intent(Intent.ACTION_VIEW, uri)) }
-                return true
-            }
-
             override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse {
                 val uri = request?.url ?: return blockedResponse()
                 if (!isAppUri(uri)) return blockedResponse()
@@ -147,27 +294,26 @@ class MainActivity : Activity() {
                 if (path.split('/').any { it == ".." }) return blockedResponse()
                 return runCatching {
                     val stream = assets.open(path)
-                    val headers = if (path == "index.html") {
-                        mapOf("Cache-Control" to "no-cache")
-                    } else {
-                        mapOf("Cache-Control" to "public, max-age=31536000, immutable")
-                    }
+                    val headers = if (path == "index.html") mapOf("Cache-Control" to "no-cache") else mapOf("Cache-Control" to "public, max-age=31536000, immutable")
                     WebResourceResponse(mimeFor(path), encodingFor(path), 200, "OK", headers, stream)
                 }.getOrElse {
-                    WebResourceResponse(
-                        "text/plain",
-                        "utf-8",
-                        404,
-                        "Not Found",
-                        mapOf("Cache-Control" to "no-store"),
-                        ByteArrayInputStream(ByteArray(0))
-                    )
+                    WebResourceResponse("text/plain", "utf-8", 404, "Not Found", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream(ByteArray(0)))
                 }
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                if (url?.let(Uri::parse)?.let(::isAppUri) == true) bridge.markUiReady()
+                if (url?.let(Uri::parse)?.let(::isAppUri) == true) {
+                    pushInsets()
+                    bridge.markUiReady()
+                }
+            }
+
+            override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                // The renderer can be killed under memory pressure; rebuild the UI instead of crashing.
+                DiagnosticLog.record(this@MainActivity, "WARN", "webview.render_gone", "crash=${detail?.didCrash()}")
+                recreate()
+                return true
             }
         }
     }
@@ -202,21 +348,15 @@ class MainActivity : Activity() {
         ByteArrayInputStream(ByteArray(0))
     )
 
-    fun canScheduleExactAlarms(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
-        val manager = getSystemService(ALARM_SERVICE) as AlarmManager
-        return manager.canScheduleExactAlarms()
-    }
+    // ------------------------------------------------------------------ permissions & pickers
 
     fun requestExactAlarmAccess(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || canScheduleExactAlarms()) return true
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        val manager = getSystemService(ALARM_SERVICE) as AlarmManager
+        if (manager.canScheduleExactAlarms()) return true
         return runCatching {
             runOnUiThread {
-                startActivity(
-                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
-                        data = Uri.parse("package:$packageName")
-                    }
-                )
+                startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply { data = Uri.parse("package:$packageName") })
             }
             true
         }.getOrDefault(false)
@@ -229,13 +369,8 @@ class MainActivity : Activity() {
             if (notificationLatch != null) return false
             val latch = CountDownLatch(1)
             notificationLatch = latch
-            runOnUiThread {
-                requestPermissions(
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    REQUEST_NOTIFICATIONS
-                )
-            }
-            latch.await(30, TimeUnit.SECONDS)
+            runOnUiThread { requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS) }
+            latch.await(60, TimeUnit.SECONDS)
             notificationLatch = null
         }
         return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
@@ -262,15 +397,16 @@ class MainActivity : Activity() {
         pickerResult = null
         pickerLatch = latch
         runOnUiThread {
-            runCatching { startActivityForResult(intent, REQUEST_DOCUMENT) }
-                .onFailure { latch.countDown() }
+            runCatching { startActivityForResult(intent, REQUEST_DOCUMENT) }.onFailure { latch.countDown() }
         }
-        latch.await(5, TimeUnit.MINUTES)
+        latch.await(10, TimeUnit.MINUTES)
         pickerLatch = null
         pickerResult
     }
 
+    @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        @Suppress("DEPRECATION")
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQUEST_WEB_FILE) {
             val callback = webFileChooserCallback
@@ -284,23 +420,16 @@ class MainActivity : Activity() {
         }
     }
 
-    override fun onRequestPermissionsResult(
-        requestCode: Int,
-        permissions: Array<out String>,
-        grantResults: IntArray
-    ) {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_NOTIFICATIONS) notificationLatch?.countDown()
     }
 
-    @Deprecated("Deprecated in Java")
-    override fun onBackPressed() {
-        if (::webView.isInitialized && webView.canGoBack()) webView.goBack() else super.onBackPressed()
-    }
+    // ------------------------------------------------------------------ lifecycle
 
     override fun onResume() {
         super.onResume()
-        if (::bridge.isInitialized) bridge.refreshRemindersFromLifecycle()
+        if (::bridge.isInitialized) bridge.onResume()
     }
 
     override fun onDestroy() {
@@ -308,16 +437,17 @@ class MainActivity : Activity() {
         notificationLatch?.countDown()
         webFileChooserCallback?.onReceiveValue(null)
         webFileChooserCallback = null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && backCallback != null) {
+            runCatching { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(backCallback as OnBackInvokedCallback) }
+            backCallback = null
+        }
         if (::webView.isInitialized) {
             webView.removeJavascriptInterface("LumaNative")
-            webView.removeJavascriptInterface("LumaWeek")
             webView.stopLoading()
+            container.removeView(webView)
             webView.destroy()
         }
-        weekBridge?.close()
-        weekBridge = null
-        if (::database.isInitialized) database.close()
-        ioExecutor.shutdownNow()
+        ioExecutor.shutdown()
         super.onDestroy()
     }
 
@@ -327,5 +457,7 @@ class MainActivity : Activity() {
         private const val REQUEST_NOTIFICATIONS = 4017
         private const val REQUEST_DOCUMENT = 4018
         private const val REQUEST_WEB_FILE = 4019
+        private val LIGHT_BACKGROUND = Color.rgb(0xF3, 0xF4, 0xF7)
+        private val DARK_BACKGROUND = Color.rgb(0x0D, 0x0F, 0x13)
     }
 }
