@@ -1,11 +1,15 @@
 # Frontend
 node_modules/
 dist/
+dist-mock/
 .vite/
+package-lock.json
 
 # Android / Gradle
 .gradle/
+.kotlin/
 android-native/.gradle/
+android-native/.kotlin/
 android-native/build/
 android-native/app/build/
 local.properties

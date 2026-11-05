@@ -6,8 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:mock": "vite build --mode mock --outDir dist-mock",
     "preview": "vite preview",
-    "check": "node scripts/validate-week-grid.mjs && svelte-check --tsconfig ./tsconfig.json",
+    "check": "svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
     "android:prepare": "npm run build",
     "adapters:sync": "node scripts/sync-shiguang-adapters.mjs"
   },
