@@ -1,10 +1,10 @@
 {
-  "version": "0.1.6-beta.1",
+  "version": "0.1.6",
   "target": "dd5563a828b9e707879ea8473b19185ee5b26041",
-  "title": "LumaSchedule v0.1.6-beta.1｜界面全面重构与原生体验修复",
-  "tagMessage": "LumaSchedule v0.1.6-beta.1 预发布测试版\n\n基于 Svelte 5 runes 重构界面，统一简洁设计；修复 Android 周次与时间规则、课程提醒、桌面小组件、系统返回和窗口边距问题；周课表课程卡增加上课时间显示。",
-  "notes": "# LumaSchedule v0.1.6-beta.1\n\n这是基于最新 `main` 的 **预发布测试版**。相较于 `v0.1.5-beta.4`，本次涉及较大幅度的 UI 与 Android 原生实现调整，建议先行测试。\n\n## 主要更新\n\n- **界面全面重构**：使用 Svelte 5 runes 重新组织状态与页面，统一扁平、简洁的视觉风格；调整今日、周课表、成绩、导入和设置等页面。\n- **周课表更清楚**：新周视图的课程卡直接显示上、下课时间（PR #18）。\n- **原生课程时间修复**：对齐周次与上课时间规则，处理课程学分、截止时间等边界情况（PR #19）。\n- **提醒与小组件改进**：滚动续排课程提醒，改善下一节课小组件的更新时机与展示行为。\n- **Android 交互改进**：完善系统返回键、状态栏及导航栏区域的适配。\n- **高校适配更新**：同步拾光课程表适配器数据快照。\n\n## 构建与验证\n\n- 已在发布目标提交通过 CI 及 Android Native 构建检查。\n- 发布流水线将使用仓库现有长期签名密钥构建并校验 APK / AAB，并附带 SHA-256 与签名证书信息。\n\n## 版本信息\n\n- Tag：`v0.1.6-beta.1`\n- Android `versionName`：`0.1.6-beta.1`\n- Android `versionCode`：`100601`\n- 类型：Prerelease（测试版）\n- 发布目标：`dd5563a828b9e707879ea8473b19185ee5b26041`\n",
+  "title": "LumaSchedule v0.1.6｜全新简洁界面与课程提醒改进",
+  "tagMessage": "LumaSchedule v0.1.6 正式版\n\n界面与交互全面重构，周课表课程卡显示上、下课时间；修复 Android 周次、学分与时间规则，增强课程提醒、小组件更新及系统导航适配。",
+  "notes": "# LumaSchedule v0.1.6\n\nLumaSchedule v0.1.6 **正式版**发布。本次版本基于已通过 CI、Android Native 构建及签名发布验证的 `v0.1.6-beta.1` 代码。\n\n## 主要更新\n\n- **全新简洁界面**：用 Svelte 5 runes 重构界面状态和页面，统一扁平化设计；改进今日、周课表、成绩、教务导入及设置页面。\n- **更直观的周课表**：课程卡直接显示上、下课时间，减少反复查看详情的操作（PR #18）。\n- **课程信息和周次修复**：修复周次、学分、截止时间与上课时间处理中的边界情况（PR #19）。\n- **提醒可靠性提升**：改进 Android 课程提醒滚动续排、时间变化后的提醒调度以及桌面小组件更新。\n- **原生体验完善**：优化返回键处理与状态栏、导航栏边距适配。\n- **高校适配同步**：更新拾光课程表高校教务适配快照。\n\n## 安装与更新\n\n- Android 8.0 及以上（API 26+）。\n- 推荐下载 `LumaSchedule-v0.1.6.apk` 直接安装。已安装官方正式签名版本的用户可以使用相同签名升级。\n- `.aab` 供应用商店分发使用，不用于直接安装。\n- 建议升级前备份课程与成绩数据。\n\n## 构建与校验\n\n- 发布源代码提交已通过 CI 与 Android Native 测试。\n- Release 工作流使用仓库现有长期 Android 正式签名密钥构建 APK / AAB，验证签名并发布 `SHA256SUMS.txt` 与 `SIGNING-CERTIFICATE.txt`。\n\n## 版本信息\n\n- Tag：`v0.1.6`\n- Android versionName：`0.1.6`\n- Android versionCode：`100699`\n- 发布类型：Stable / 正式版\n- 发布源代码：`dd5563a828b9e707879ea8473b19185ee5b26041`\n",
   "metadataOnly": false,
-  "prerelease": true,
-  "requestNonce": "release-v0.1.6-beta.1-20261106-dd5563a"
+  "prerelease": false,
+  "requestNonce": "release-v0.1.6-stable-20261106-dd5563a"
 }
