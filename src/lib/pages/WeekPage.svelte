@@ -7,6 +7,8 @@
     clamp,
     courseInWeek,
     courseRange,
+    courseTimeKnown,
+    creditLabel,
     dateOfWeekDay,
     formatClock,
     layoutLanes,
@@ -18,6 +20,7 @@
     WEEKDAY_SHORT
   } from '../schedule/calendar';
   import { courseSheets, toneClass } from '../schedule/courseSheets.svelte';
+  import type { Course } from '../types';
   import EmptyState from '../ui/EmptyState.svelte';
   import Sheet from '../ui/Sheet.svelte';
 
@@ -50,6 +53,43 @@
   );
   const colorful = $derived(app.appearance.colorfulCourses);
   const compact = $derived(app.display.compactMode);
+  let viewportWidth = $state(window.innerWidth);
+  /** Matches the `min-width: 600px` styles below. */
+  const wide = $derived(viewportWidth >= 600);
+
+  /**
+   * Line boxes of a course card in CSS px at 100 % text; they mirror the .course
+   * styles below. `pad` is the vertical padding, `gap` the space between lines.
+   */
+  const CARD = {
+    normal: { pad: 8, gap: 2, name: 12 * 1.25, meta: 10.5 * 1.25 },
+    wide: { pad: 8, gap: 2, name: 13 * 1.25, meta: 11.5 * 1.25 },
+    compact: { pad: 6, gap: 0, name: 11 * 1.15, meta: 10 * 1.15 }
+  };
+  const card = $derived(compact ? CARD.compact : wide ? CARD.wide : CARD.normal);
+  /** On Android the grid follows the system font size up to 110 % (see --grid-text). */
+  const textScale = Math.min(Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--text-zoom')) || 1, 1.1);
+
+  /**
+   * How many lines the course name may use so the time right below it stays
+   * visible: start and end on two lines in narrow cards, one line otherwise. Short
+   * cards drop the end time first, and the name always keeps one line.
+   */
+  function nameLines(height: number, lanes: number) {
+    const nameLine = card.name * textScale;
+    const metaLine = card.meta * textScale + card.gap;
+    const room = height - card.pad - 1;
+    let timeLines = app.display.showTime ? (!wide || lanes > 1 ? 2 : 1) : 0;
+    while (timeLines > 0 && room - timeLines * metaLine < nameLine) timeLines -= 1;
+    return clamp(Math.floor((room - timeLines * metaLine) / nameLine), 1, compact ? 3 : 4);
+  }
+
+  /** Shown instead of a clock time when the timetable has no time for the course. */
+  function sectionText(course: Course) {
+    const from = Math.max(1, course.startSection || 1);
+    const to = Math.max(from, course.endSection || from);
+    return from === to ? `第${from}节` : `第${from}–${to}节`;
+  }
 
   /** Pixels per minute of the time-proportional grid. */
   const ppm = $derived(compact ? 0.74 : 1);
@@ -128,6 +168,8 @@
   }
 </script>
 
+<svelte:window bind:innerWidth={viewportWidth} />
+
 <section class="week-page">
   <header class="toolbar">
     <button class="icon-btn" type="button" onclick={() => goTo(selectedWeek - 1)} disabled={selectedWeek <= 1} aria-label="上一周">
@@ -180,21 +222,39 @@
               {#each placed.get(column.day) ?? [] as block (block.item.id)}
                 {@const course = block.item}
                 {@const height = Math.max(22, (block.end - block.start) * ppm - 2)}
+                {@const known = courseTimeKnown(course, app.sections)}
                 <button
                   class="course {toneClass(course, colorful)}"
+                  class:tight={!wide && block.lanes > 1}
                   type="button"
                   style:top="{y(block.start) + 1}px"
                   style:height="{height}px"
                   style:left="calc({(block.lane / block.lanes) * 100}% + 1.5px)"
                   style:width="calc({100 / block.lanes}% - 3px)"
+                  style:--name-lines={nameLines(height, block.lanes)}
                   onclick={() => courseSheets.show(course, column.date)}
                 >
-                  <b>{course.name}</b>
-                  {#if app.display.showRoom && course.room}<span class="room">{course.room}</span>{/if}
-                  {#if app.display.showTime && height > 64}
-                    <span class="time num"><span class="t-start">{formatClock(block.start)}</span><span class="t-end">–{formatClock(block.end)}</span></span>
+                  <b class="name">{course.name}</b>
+                  {#if app.display.showTime}
+                    {#if known.start && known.end}
+                      {#if !wide || block.lanes > 1}
+                        <!-- Narrow cards stack start over end, like the timeline on the Today page. -->
+                        <span class="meta time range num">{formatClock(block.start)}</span>
+                        <span class="meta time range end num">{formatClock(block.end)}</span>
+                      {:else}
+                        <span class="meta time range num">{formatClock(block.start)}–{formatClock(block.end)}</span>
+                      {/if}
+                    {:else if known.start}
+                      <span class="meta time num">{formatClock(block.start)} 开始</span>
+                    {:else}
+                      <span class="meta time">{sectionText(course)}</span>
+                    {/if}
                   {/if}
-                  {#if app.display.showTeacher && course.teacher && !compact && height > 80}<span>{course.teacher}</span>{/if}
+                  {#if !compact}
+                    {#if app.display.showRoom && course.room}<span class="meta room">{course.room}</span>{/if}
+                    {#if app.display.showTeacher && course.teacher}<span class="meta">{course.teacher}</span>{/if}
+                    {#if creditLabel(course.credit)}<small class="meta credit">{creditLabel(course.credit)}</small>{/if}
+                  {/if}
                 </button>
               {/each}
               {#if ghost?.day === column.day}
@@ -314,7 +374,7 @@
     min-height: 0;
     overflow: hidden;
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-xs);
     background: var(--surface);
   }
 
@@ -458,17 +518,27 @@
     cursor: default;
   }
 
+  /*
+   * Card lines stack in one column. A line that does not fit completely wraps
+   * into a second column, which column-gap pushes past the clipped edge, so a
+   * card never shows half a line. Keep sizes in step with CARD in the script.
+   */
   .course {
     position: absolute;
     z-index: 2;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    row-gap: 2px;
+    column-gap: 16px;
     overflow: hidden;
     padding: 4px 4px 4px 6px;
     border: 0;
-    border-radius: var(--radius-xs);
-    background: var(--tone-bg);
+    border-radius: calc(var(--radius-xs) - 2px);
+    /* Opaque: the tone over the board surface, so section bands do not show through the card. */
+    background-color: var(--surface);
+    background-image: linear-gradient(var(--tone-bg), var(--tone-bg));
     color: var(--tone-fg);
     text-align: left;
     box-shadow: inset 2.5px 0 0 var(--tone-bar);
@@ -478,7 +548,12 @@
     filter: brightness(0.96);
   }
 
-  .course b {
+  .course > * {
+    flex: none;
+    width: 100%;
+  }
+
+  .course .name {
     display: -webkit-box;
     overflow: hidden;
     font-size: calc(12px * var(--grid-text));
@@ -486,11 +561,11 @@
     line-height: 1.25;
     word-break: break-all;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 4;
-    line-clamp: 4;
+    -webkit-line-clamp: var(--name-lines, 4);
+    line-clamp: var(--name-lines, 4);
   }
 
-  .course span {
+  .course .meta {
     overflow: hidden;
     font-size: calc(10.5px * var(--grid-text));
     line-height: 1.25;
@@ -498,28 +573,53 @@
     word-break: break-all;
   }
 
+  .course .time {
+    font-weight: 600;
+    opacity: 0.92;
+  }
+
+  .course .range {
+    white-space: nowrap;
+  }
+
+  .course .end {
+    font-weight: 500;
+    opacity: 0.7;
+  }
+
   .course .room {
     font-weight: 550;
     opacity: 0.9;
   }
 
-  .course .time {
-    white-space: nowrap;
+  .course .credit {
+    margin-top: auto;
+    opacity: 0.7;
   }
 
-  .course .time span {
-    opacity: 1;
+  .compact .course {
+    row-gap: 0;
+    padding: 3px 3px 3px 5px;
   }
 
-  /* Narrow phone columns only have room for the start time. */
-  .course .t-end {
-    display: none;
-  }
-
-  .compact .course b {
+  .compact .course .name {
     font-size: calc(11px * var(--grid-text));
-    -webkit-line-clamp: 3;
-    line-clamp: 3;
+    line-height: 1.15;
+  }
+
+  .compact .course .meta {
+    font-size: calc(10px * var(--grid-text));
+    line-height: 1.15;
+  }
+
+  /* Side-by-side conflicting courses on a phone (after the compact rules so both modes get it). */
+  .course.tight {
+    padding-right: 2px;
+    padding-left: 4px;
+  }
+
+  .course.tight .time {
+    font-size: calc(9.5px * var(--grid-text));
   }
 
   .ghost {
@@ -578,11 +678,8 @@
     top: 16px;
     left: 50%;
     z-index: 5;
-    padding: 6px 14px;
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-    box-shadow: var(--shadow-md);
-    color: var(--text-2);
+    padding: 4px 8px;
+    color: var(--text-3);
     font-size: var(--text-sm);
     transform: translateX(-50%);
     pointer-events: none;
@@ -639,16 +736,12 @@
       --axis: 44px;
     }
 
-    .course b {
+    .board:not(.compact) .course .name {
       font-size: calc(13px * var(--grid-text));
     }
 
-    .course span {
+    .board:not(.compact) .course .meta {
       font-size: calc(11.5px * var(--grid-text));
-    }
-
-    .course .t-end {
-      display: inline;
     }
   }
 </style>

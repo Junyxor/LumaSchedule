@@ -38,7 +38,7 @@
   <Row toggle title="显示时间" sub="周课表左侧显示节次时间，课程卡显示起止时间" checked={app.display.showTime} onclick={() => update({ showTime: !app.display.showTime })} />
   <Row toggle title="显示教室" checked={app.display.showRoom} onclick={() => update({ showRoom: !app.display.showRoom })} />
   <Row toggle title="显示教师" checked={app.display.showTeacher} onclick={() => update({ showTeacher: !app.display.showTeacher })} />
-  <Row toggle title="紧凑模式" sub="缩短周课表的高度，一屏看到更多节次" checked={app.display.compactMode} onclick={() => update({ compactMode: !app.display.compactMode })} />
+  <Row toggle title="紧凑模式" sub="缩短周课表的高度，卡片只显示课程名和时间" checked={app.display.compactMode} onclick={() => update({ compactMode: !app.display.compactMode })} />
 </div>
 
 <div class="list-caption">节次</div>
