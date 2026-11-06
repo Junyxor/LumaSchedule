@@ -3,7 +3,7 @@
     @android.webkit.JavascriptInterface <methods>;
 }
 
-# Keep broadcast receivers and the import Activity names referenced from AndroidManifest.
+# Activities and receivers referenced from AndroidManifest.xml.
 -keep class com.lumaschedule.app.MainActivity { *; }
 -keep class com.lumaschedule.app.shiguang.ShiguangImportActivity { *; }
 -keep class com.lumaschedule.app.widgets.NextCourseWidgetProvider { *; }

@@ -25,7 +25,7 @@ class WebDavClient {
             "<?xml version=\"1.0\"?><propfind xmlns=\"DAV:\"><prop><displayname/></prop></propfind>".toByteArray(StandardCharsets.UTF_8)
         )
         val ok = response.status in 200..299
-        return result(ok, response.status, if (ok) "WebDAV 连接正常。" else "WebDAV 返回 HTTP ${response.status}", target.toString(), response.header("etag"))
+        return result(ok, response.status, if (ok) "WebDAV 连接正常。" else failure("连接", response.status), target.toString(), response.header("etag"))
     }
 
     fun upload(credentials: JSONObject, backup: String): JSONObject {
@@ -42,7 +42,7 @@ class WebDavClient {
             bytes
         )
         val ok = response.status in 200..299
-        return result(ok, response.status, if (ok) "完整备份已上传。" else "上传失败：HTTP ${response.status}", target.toString(), response.header("etag"))
+        return result(ok, response.status, if (ok) "完整备份已上传到云端。" else failure("上传", response.status), target.toString(), response.header("etag"))
     }
 
     fun download(credentials: JSONObject): Pair<JSONObject, String?> {
@@ -51,7 +51,7 @@ class WebDavClient {
         val target = resolveRemote(base, remotePath)
         val response = request(target, "GET", credentials, emptyMap(), null)
         val ok = response.status in 200..299
-        val result = result(ok, response.status, if (ok) "云端备份已下载。" else "下载失败：HTTP ${response.status}", target.toString(), response.header("etag"))
+        val result = result(ok, response.status, if (ok) "云端备份已下载。" else failure("下载", response.status), target.toString(), response.header("etag"))
         val body = if (ok) response.body.toString(StandardCharsets.UTF_8) else null
         return result to body
     }
@@ -65,7 +65,7 @@ class WebDavClient {
             val target = resolveRemote(base, accumulated.joinToString("/") + "/")
             val response = request(target, "MKCOL", credentials, emptyMap(), null)
             if (response.status !in 200..299 && response.status != 405) {
-                error("创建 WebDAV 目录失败：HTTP ${response.status}")
+                error(failure("创建目录", response.status))
             }
         }
     }
@@ -255,6 +255,18 @@ class WebDavClient {
             if (output.size() > MAX_HEADER_LINE_BYTES) error("WebDAV HTTP 头过长。")
         }
         return output.toString(StandardCharsets.ISO_8859_1.name())
+    }
+
+    private fun failure(action: String, status: Int): String = when (status) {
+        301, 302, 307, 308 -> "${action}失败：服务器要求跳转（HTTP $status），请检查地址是否完整并以 / 结尾。"
+        401 -> "${action}失败：用户名或密码不正确（HTTP 401）。坚果云等网盘需要使用「应用密码」。"
+        403 -> "${action}失败：没有访问这个路径的权限（HTTP 403）。"
+        404 -> "${action}失败：远程文件或目录不存在（HTTP 404）。"
+        409 -> "${action}失败：上级目录不存在（HTTP 409）。"
+        423 -> "${action}失败：远程文件被锁定（HTTP 423）。"
+        507 -> "${action}失败：网盘空间不足（HTTP 507）。"
+        in 500..599 -> "${action}失败：WebDAV 服务器出错（HTTP $status），请稍后重试。"
+        else -> "${action}失败：HTTP $status。"
     }
 
     private fun result(

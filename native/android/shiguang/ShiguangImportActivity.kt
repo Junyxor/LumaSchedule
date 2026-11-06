@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -35,6 +36,7 @@ import java.util.concurrent.TimeUnit
 class ShiguangImportActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var progress: ProgressBar
+    private var hintView: TextView? = null
     private lateinit var sessionId: String
     private lateinit var adapterScript: String
     private lateinit var adapterName: String
@@ -71,10 +73,11 @@ class ShiguangImportActivity : Activity() {
         setContentView(buildUi())
         registerSystemBack()
         val initialMessage = when {
-            captureKind == "grades" -> "请登录教务系统，进入成绩查询/历年成绩页面后点击「读取成绩」。"
-            manualTrigger -> "请登录教务系统，进入个人课表页面并点击查询，再点「读取课表」。"
-            else -> "请完成教务系统登录。登录成功后会自动尝试读取；也可随时点右上角「读取课表」。"
+            captureKind == "grades" -> "登录教务系统并打开成绩查询（历年成绩）页面，再点下方「读取成绩」。"
+            manualTrigger -> "登录教务系统并打开个人课表页面，查询出课表后点下方「读取课表」。"
+            else -> "登录成功后会自动读取课表；如果没有反应，打开课表页面后点下方「读取课表」。"
         }
+        hintView?.text = initialMessage
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         prefs.edit()
             .putString(key(sessionId, "status"), "running")
@@ -88,7 +91,6 @@ class ShiguangImportActivity : Activity() {
         CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true)
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
-        webView.settings.databaseEnabled = true
         webView.settings.allowFileAccess = false
         webView.settings.allowContentAccess = false
         webView.settings.javaScriptCanOpenWindowsAutomatically = false
@@ -131,63 +133,110 @@ class ShiguangImportActivity : Activity() {
     }
 
     private fun buildUi(): LinearLayout {
+        val accent = Color.rgb(91, 86, 214)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.rgb(246, 247, 251))
+            setBackgroundColor(Color.WHITE)
+        }
+        // Android 15+ always draws apps edge-to-edge; keep the bars and the bottom action clear of
+        // the status bar, navigation bar and keyboard.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            root.setOnApplyWindowInsetsListener { view, insets ->
+                val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+                val ime = insets.getInsets(WindowInsets.Type.ime())
+                view.setPadding(bars.left, bars.top, bars.right, maxOf(bars.bottom, ime.bottom))
+                insets
+            }
         }
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(14.dp, 10.dp, 14.dp, 10.dp)
-            setBackgroundColor(Color.WHITE)
+            setPadding(4.dp, 4.dp, 14.dp, 4.dp)
+            minimumHeight = 56.dp
         }
-        val back = TextView(this).apply {
-            text = "返回"
-            textSize = 16f
+        val close = TextView(this).apply {
+            text = "关闭"
+            textSize = 15f
             gravity = Gravity.CENTER
-            minWidth = 64.dp
-            minimumWidth = 64.dp
-            minHeight = 48.dp
-            minimumHeight = 48.dp
-            setPadding(8.dp, 0, 8.dp, 0)
-            setTextColor(Color.rgb(81, 75, 194))
+            setPadding(14.dp, 0, 14.dp, 0)
+            setTextColor(accent)
             isClickable = true
             isFocusable = true
-            contentDescription = "返回 LumaSchedule"
+            background = ripple(Color.TRANSPARENT, 12.dp.toFloat())
+            contentDescription = "关闭并返回 LumaSchedule"
             setOnClickListener { handleBack() }
         }
-        val titleView = TextView(this).apply {
-            text = "$schoolName  ·  $adapterName"
-            textSize = 14f
-            setTextColor(Color.rgb(42, 44, 55))
-            setPadding(10.dp, 0, 8.dp, 0)
+        val titles = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(6.dp, 0, 8.dp, 0)
         }
+        titles.addView(TextView(this).apply {
+            text = listOf(schoolName, adapterName).filter { it.isNotBlank() }.joinToString(" · ")
+            textSize = 15f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(Color.rgb(22, 24, 36))
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        titles.addView(TextView(this).apply {
+            text = if (insecureTransport) "⚠ 未加密连接 · $primaryLoginHost" else "🔒 $primaryLoginHost"
+            textSize = 12f
+            setTextColor(if (insecureTransport) Color.rgb(181, 109, 7) else Color.rgb(110, 113, 128))
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+        })
         progress = ProgressBar(this).apply { isIndeterminate = true }
-        bar.addView(back, LinearLayout.LayoutParams(64.dp, 48.dp))
-        bar.addView(titleView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        bar.addView(progress, LinearLayout.LayoutParams(24.dp, 24.dp))
-        webView = WebView(this)
+        bar.addView(close, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 44.dp))
+        bar.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        bar.addView(progress, LinearLayout.LayoutParams(22.dp, 22.dp))
         root.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(View(this).apply { setBackgroundColor(Color.rgb(230, 231, 236)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
+        webView = WebView(this)
         root.addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        // Full-width bottom action: easy to hit after SSO, independent of top-bar layout.
+
+        // Full-width bottom action: easy to reach after SSO and independent of the page layout.
+        val footer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(16.dp, 10.dp, 16.dp, 12.dp)
+            setBackgroundColor(Color.rgb(248, 249, 251))
+        }
+        hintView = TextView(this).apply {
+            textSize = 12.5f
+            setTextColor(Color.rgb(96, 99, 115))
+            setPadding(2.dp, 0, 2.dp, 8.dp)
+        }
         val capture = Button(this).apply {
             text = if (captureKind == "grades") "读取成绩" else "读取课表"
             isAllCaps = false
             textSize = 16f
-            minHeight = 52.dp
-            setPadding(16.dp, 12.dp, 16.dp, 12.dp)
+            setTextColor(Color.WHITE)
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            stateListAnimator = null
+            background = ripple(accent, 14.dp.toFloat())
             setOnClickListener { triggerManualCapture() }
         }
-        root.addView(
-            capture,
-            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        )
+        footer.addView(hintView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        footer.addView(capture, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 50.dp))
+        root.addView(View(this).apply { setBackgroundColor(Color.rgb(230, 231, 236)) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
+        root.addView(footer, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         return root
+    }
+
+    private fun ripple(color: Int, radius: Float): android.graphics.drawable.Drawable {
+        val shape = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = radius
+            setColor(color)
+        }
+        val mask = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = radius
+            setColor(Color.WHITE)
+        }
+        return android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(Color.argb(40, 0, 0, 0)), shape, mask)
     }
 
     private fun registerSystemBack() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
-        val callback = OnBackInvokedCallback { handleBack() }
+        val callback = OnBackInvokedCallback { handleSystemBack() }
         onBackInvokedDispatcher.registerOnBackInvokedCallback(
             OnBackInvokedDispatcher.PRIORITY_DEFAULT,
             callback
@@ -199,8 +248,10 @@ class ShiguangImportActivity : Activity() {
         if (!::webView.isInitialized || currentStatus() == "complete") return
         cancelPendingInject()
         progress.visibility = View.VISIBLE
+        // Always re-inject: auto-injection is skipped on the login host, which is often
+        // the same host that serves the grade page, so the capture function may not exist yet.
         val script = if (captureKind == "grades") {
-            "if(typeof window.__LUMA_CAPTURE_GRADES__==='function'){window.__LUMA_CAPTURE_GRADES__();}else{void 0;}"
+            "window.__LUMA_CAPTURE_REQUESTED__=true;delete window.__LUMA_SHIGUANG_BOOTSTRAPPED__;\n${buildInjectionScript()}"
         } else {
             "delete window.__LUMA_SHIGUANG_BOOTSTRAPPED__;\n${buildInjectionScript()}"
         }
@@ -318,6 +369,7 @@ $adapterScript
         fun updateProgress(message: String) {
             if (currentStatus() == "complete") return
             save("message", message.take(200))
+            runOnUiThread { hintView?.text = message.take(200) }
         }
 
         @JavascriptInterface
@@ -500,11 +552,27 @@ $adapterScript
         overridePendingTransition(0, 0)
     }
 
+    /** The system back gesture walks back through the教务 pages first; the top-left button always leaves. */
+    private fun handleSystemBack() {
+        if (::webView.isInitialized && webView.canGoBack()) webView.goBack() else handleBack()
+    }
+
     @Deprecated("Deprecated in Java")
-    override fun onBackPressed() = handleBack()
+    override fun onBackPressed() = handleSystemBack()
 
     override fun onDestroy() {
         cancelPendingInject()
+        // Finished without going through back/complete/error (task reset, another Activity
+        // clearing the stack): end the session so the app stops waiting for this login.
+        if (isFinishing && ::sessionId.isInitialized && sessionId.isNotBlank()) {
+            val status = currentStatus()
+            if (status == "running" || status == "collecting") {
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+                    .putString(key(sessionId, "status"), "error")
+                    .putString(key(sessionId, "message"), "登录窗口已关闭；本次没有导入数据。")
+                    .apply()
+            }
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             backInvokedCallback?.let { callback ->
                 runCatching { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(callback) }
