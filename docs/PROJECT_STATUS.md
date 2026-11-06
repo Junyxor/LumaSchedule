@@ -1,27 +1,31 @@
-# LumaSchedule v0.1 状态
+# LumaSchedule 状态
 
 > 仓库：`Junyxor/LumaSchedule` · 应用 ID：`com.lumaschedule.app`
 
 ## 已经落地
 
 ### 核心与 UI
-- [x] Svelte 5 + Tauri 2 跨平台壳
-- [x] Responsive desktop/mobile layout
-- [x] Liquid Glass 参数实时控制
-- [x] Rust canonical schedule model
-- [x] `WeekMask(u64)` 与课程冲突判断
-- [x] SQLite 本地数据库
-- [x] SQLite-backed Today / Week，空库时才回退 Demo
+- [x] Svelte 5（runes）前端 + Kotlin 原生层，Android WebView 加载打包在 APK 内的界面
+- [x] 统一设计系统（`src/styles/tokens.css`）：浅色 / 深色 / 跟随系统，7 种主题色，可选多彩课程
+- [x] 手机底部导航、平板与横屏左侧导航
+- [x] 系统返回键先关闭弹窗、返回上一级；原生注入状态栏 / 导航栏 / 键盘安全区
+- [x] SQLite 本地数据库（`PRAGMA user_version` 迁移，单例连接与统一锁）
+- [x] 多课表：新建、切换、重命名、删除；`WeekMask(u64)` 周次与冲突判断
+- [x] 作息时间编辑；未设置时按课程时间推算，仍然缺少时间的节次按常见作息估算，并在今日页和提醒设置中提示
+- [x] 周次与上课时间规则前端与原生一致（`calendar.ts` ↔ `ScheduleMath.kt`）：第 1 周是开学日期所在的那一周（周一或周日开始），「现在」按学期时区计算；今日页、提醒、小组件和 ICS 导出使用同一套时间
+- [x] 旧版本按课程名保存的学分迁移进数据库，并保留用于补全没有学分的历史成绩
+- [x] 界面文字跟随系统字体大小（85%–130%），周课表最多放大到 110%
 
 ### 导入 / 导出
 - [x] JSON / WakeUp-like / 拾光字段归一化导入
-- [x] ICS 导入 +基础 Weekly RRULE 展开
-- [x] CSV / TSV 导入
+- [x] WakeUp `.wakeup_schedule` 备份文件导入
+- [x] ICS 导入：RRULE（WEEKLY / DAILY、COUNT、UNTIL、INTERVAL、BYDAY）、EXDATE、UTC 时间（有 `X-WR-TIMEZONE` 时按日历时区换算），按周次合并；读取本应用写入的开学日期 / 周起始日 / 总周数，周日起始的课表也能原样导回
+- [x] CSV / TSV 导入（中文表头、BOM、GBK 编码）
 - [x] CSES v1 YAML 导入
-- [x] 导入预览 + 新建课表事务提交
-- [x] LumaSchedule JSON 导出
-- [x] ICS 导出（按实际周次展开为 VEVENT）
-- [x] 完整 `.luma.json` 数据快照导出 / 恢复
+- [x] 导入预览：逐条勾选、差异统计、合并 / 覆盖 / 新建课表
+- [x] LumaSchedule JSON 导出（含作息时间、学期配置、学分，可完整导回）
+- [x] ICS 导出（按实际周次展开为 UTC VEVENT，按 RFC 5545 折行）
+- [x] 完整 `.luma.json` 数据快照导出 / 恢复，兼容旧格式备份
 - [x] 完整快照包含课程、作息、异常调课、提醒、自动化、日历绑定、同步配置、设置与导入审计
 
 ### WebDAV
@@ -50,28 +54,23 @@
 - [x] GDUT adapter 已作为首个真实目标接入，并增加本地 override（SSO 会话探测 + 常驻手动读取按钮）；实际账号登录仍需真机验收
 
 ### Android 系统能力
-- [x] 2×1 RemoteViews 下一节课 Widget
-- [x] Svelte → Rust → Kotlin → Widget 快照桥
-- [x] AlarmManager 后台课程提醒
-- [x] BOOT_COMPLETED / MY_PACKAGE_REPLACED 后恢复未来提醒
+- [x] RemoteViews「下一节课」Widget：原生读取 SQLite，上课 / 下课时自动刷新，支持深色模式
+- [x] AlarmManager 课程提醒：滚动安排未来 14 天（最多 160 个），提醒触发、开机、应用更新、改时间 / 时区后自动续排
+- [x] 已安排的提醒 ID 记录在设备本地，课表变更和恢复备份后总会重新同步，恢复其他设备的备份不会留下孤儿提醒；备份开启了提醒时会先申请通知权限
+- [x] 点提醒通知或小组件时像桌面图标一样回到应用，不会关掉正在进行的教务登录；登录窗口被关闭时导入会话会结束
+- [x] Android 15+ 强制全面屏下，教务登录窗口避开状态栏、导航栏和键盘
 - [x] GitHub Actions Debug APK
 - [x] GitHub Actions Release APK + AAB / Secrets 签名
 
 ## 仍需继续
 
-- [ ] Merge / overwrite 导入 Diff 与逐项冲突决策
-- [ ] XLS / XLSX（calamine）与通用 HTML 导入
-- [ ] WakeUp 分享文本 / JSON 的更严格双向导出兼容
+- [ ] 合并导入时逐项冲突决策（当前合并会保留两边课程并提示冲突数量）
+- [ ] XLS / XLSX 与通用 HTML 导入
+- [ ] WakeUp 分享口令（需要 WakeUp 服务端，当前只支持导出的文件）
 - [ ] 拾光适配器兼容性批量测试矩阵（不仅是 Bridge API 覆盖）
 - [ ] adapter snapshot 签名 / 信任根（当前有 SHA-256 会话指纹 + 沙箱，但尚无仓库签名验证）
 - [ ] 正方 / URP / 青果 / 超星 / Wisedu / EAMS first-party 通用协议实现
-- [ ] 整学期提醒批量调度、节假日和临时调课重算
-- [ ] 常驻“下一节课”通知、更多 Android Widget
+- [ ] 节假日和临时调课
+- [ ] 常驻“下一节课”通知、更多尺寸的 Android Widget
 - [ ] WebDAV 自动周期同步 / 冲突版本历史（当前是手动完整备份与恢复）
 - [ ] CalDAV / 系统日历双向同步
-- [ ] iOS WidgetKit / Live Activity
-- [ ] Desktop tray / compact mode
-
-## 当前环境验证限制
-
-本生成容器有 Node，但无法访问 npm registry，且没有 Rust toolchain，所以无法在容器内完成 `npm install` / `cargo check` / Gradle APK 真编译。仓库 CI 和 Android Actions 是权威编译门禁；代码推送后按 Actions 日志继续修到通过。

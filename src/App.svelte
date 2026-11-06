@@ -1,177 +1,192 @@
 <script lang="ts">
-  import { CalendarDays, CalendarRange, Download, GraduationCap, LayoutGrid, Settings2, Sparkles } from 'lucide-svelte';
-  import { onDestroy, onMount } from 'svelte';
-  import Today from './lib/pages/Today.svelte';
-  import Week from './lib/pages/Week.svelte';
-  import Grades from './lib/pages/Grades.svelte';
-  import ImportCenter from './lib/pages/ImportCenter.svelte';
-  import Widgets from './lib/pages/Widgets.svelte';
-  import Settings from './lib/pages/Settings.svelte';
-  import type { Course, GlassSettings, PageId, SchedulePreferences, ScheduleSnapshot } from './lib/types';
-  import { defaultGlass } from './lib/state';
-  import { getBootstrap, getSchedulePreferences, getScheduleSnapshot, publishWidgetSnapshot, syncCourseReminders } from './lib/tauri';
+  import { CalendarDays, CalendarRange, Download, GraduationCap, Settings2 } from 'lucide-svelte';
+  import { onMount } from 'svelte';
+  import { importSession } from './lib/import/session.svelte';
+  import GradesPage from './lib/pages/GradesPage.svelte';
+  import ImportPage from './lib/pages/ImportPage.svelte';
+  import SettingsPage from './lib/pages/SettingsPage.svelte';
+  import TodayPage from './lib/pages/TodayPage.svelte';
+  import WeekPage from './lib/pages/WeekPage.svelte';
+  import CourseDetailSheet from './lib/schedule/CourseDetailSheet.svelte';
+  import CourseEditorSheet from './lib/schedule/CourseEditorSheet.svelte';
+  import { systemPrefersDark } from './lib/native/bridge';
+  import { app } from './lib/state/app.svelte';
+  import { back } from './lib/state/back.svelte';
+  import { resolvedTheme } from './lib/state/theme';
+  import type { PageId } from './lib/types';
+  import ConfirmHost from './lib/ui/ConfirmHost.svelte';
+  import Toasts from './lib/ui/Toasts.svelte';
 
-  let page: PageId = 'today';
-  let glass: GlassSettings = { ...defaultGlass };
-  let colorfulCourses = typeof localStorage !== 'undefined' ? localStorage.getItem('luma.colorfulCourses') === 'true' : false;
-  let scheduleSnapshot: ScheduleSnapshot = { courses: [], hasSchedule: false };
-  let schedulePreferences: SchedulePreferences = {
-    hasSchedule: false,
-    termName: '',
-    termStart: '',
-    weekCount: 20,
-    timezone: 'Asia/Shanghai',
-    weekStartsOn: 1,
-    weekendMode: 'auto',
-    showTeacher: true,
-    showRoom: true,
-    showTime: true,
-    compactMode: false,
-    defaultSections: 12
-  };
-  let runtimeCourses: Course[] = [];
-  let liveData = false;
-  let runtimeReady = false;
-  let midnightTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const nav = [
-    { id: 'today' as PageId, label: '今日', icon: CalendarDays },
-    { id: 'week' as PageId, label: '周课表', icon: CalendarRange },
-    { id: 'grades' as PageId, label: '成绩', icon: GraduationCap },
-    { id: 'import' as PageId, label: '导入', icon: Download },
-    { id: 'widgets' as PageId, label: '小组件', icon: LayoutGrid },
-    { id: 'settings' as PageId, label: '设置', icon: Settings2 }
+  const nav: { id: PageId; label: string; icon: typeof CalendarDays }[] = [
+    { id: 'today', label: '今日', icon: CalendarDays },
+    { id: 'week', label: '课表', icon: CalendarRange },
+    { id: 'grades', label: '成绩', icon: GraduationCap },
+    { id: 'import', label: '导入', icon: Download },
+    { id: 'settings', label: '设置', icon: Settings2 }
   ];
 
-  function parseMinutes(value: string) {
-    const [hour, minute] = value.split(':').map(Number);
-    return Number.isFinite(hour) && Number.isFinite(minute) ? hour * 60 + minute : Number.NaN;
-  }
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  let systemDark = $state(systemPrefersDark());
+  const theme = $derived(resolvedTheme(app.appearance.theme, systemDark));
 
-  function nextRemainingCourse(courses: Course[]) {
-    const now = new Date();
-    const weekday = ((now.getDay() + 6) % 7) + 1;
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-    return [...courses]
-      .filter((course) => {
-        if (course.day > weekday) return true;
-        if (course.day < weekday) return false;
-        const end = parseMinutes(course.end);
-        return !Number.isFinite(end) || end >= currentMinutes;
-      })
-      .sort((a, b) => {
-        if (a.day !== b.day) return a.day - b.day;
-        const aStart = parseMinutes(a.start);
-        const bStart = parseMinutes(b.start);
-        const aKey = Number.isFinite(aStart) ? aStart : a.startSection * 60;
-        const bKey = Number.isFinite(bStart) ? bStart : b.startSection * 60;
-        return aKey - bKey;
-      })[0] ?? null;
-  }
+  $effect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = theme;
+    root.dataset.accent = app.appearance.accent;
+    window.LumaNative?.setSystemBarsDark?.(theme === 'dark');
+  });
 
-  function readLocalGlass() {
-    const saved = localStorage.getItem('luma.glass');
-    if (!saved) return null;
-    try { return { ...defaultGlass, ...JSON.parse(saved) } as GlassSettings; }
-    catch { return null; }
-  }
-
-  async function refreshWidgetSnapshot() {
-    if (!liveData) return;
-    const next = nextRemainingCourse(runtimeCourses);
-    if (next) {
-      await publishWidgetSnapshot({
-        courseName: next.name,
-        courseMeta: `${next.start || `第${next.startSection}节`}–${next.end || `第${next.endSection}节`} · ${next.room || '教室待定'}${next.teacher ? ` · ${next.teacher}` : ''}`,
-        countdown: scheduleSnapshot.currentWeek ? `第 ${scheduleSnapshot.currentWeek} 周` : '本周'
-      });
-      return;
-    }
-    await publishWidgetSnapshot({
-      courseName: scheduleSnapshot.hasSchedule ? '当前周没有课程' : '暂无课程',
-      courseMeta: scheduleSnapshot.hasSchedule ? '课表已保存，进入教学周后会自动更新' : '打开 LumaSchedule 导入课表',
-      countdown: scheduleSnapshot.currentWeek ? `第 ${scheduleSnapshot.currentWeek} 周` : '--'
-    });
-  }
-
-  async function loadRuntimeData() {
-    try {
-      const [bootstrap, snapshot, preferences] = await Promise.all([getBootstrap(), getScheduleSnapshot(), getSchedulePreferences()]);
-      const localGlass = readLocalGlass();
-      glass = localGlass ?? (bootstrap.glassSettings ? { ...defaultGlass, ...bootstrap.glassSettings } : { ...defaultGlass });
-      scheduleSnapshot = snapshot;
-      schedulePreferences = { ...schedulePreferences, ...preferences };
-      runtimeCourses = snapshot.courses;
-      liveData = bootstrap.dbReady;
-    } catch {
-      glass = readLocalGlass() ?? { ...defaultGlass };
-      scheduleSnapshot = { courses: [], hasSchedule: false };
-      runtimeCourses = [];
-      liveData = false;
-    } finally {
-      runtimeReady = true;
-    }
-    void refreshWidgetSnapshot();
-    if (liveData) void syncCourseReminders().catch(() => undefined);
-  }
-
-  function scheduleMidnightRefresh() {
-    if (midnightTimer) clearTimeout(midnightTimer);
-    const now = new Date();
-    const nextMidnight = new Date(now);
-    nextMidnight.setHours(24, 0, 5, 0);
-    midnightTimer = setTimeout(() => {
-      void loadRuntimeData();
-      scheduleMidnightRefresh();
-    }, Math.max(1_000, nextMidnight.getTime() - now.getTime()));
-  }
-
-  function onDataChanged() { void loadRuntimeData(); }
-  function onVisibilityChange() { if (document.visibilityState === 'visible') void loadRuntimeData(); }
+  const backEnabled = $derived(back.depth > 0 || app.page !== 'today');
+  $effect(() => {
+    window.LumaNative?.setBackEnabled?.(backEnabled);
+  });
 
   onMount(() => {
-    void loadRuntimeData();
-    scheduleMidnightRefresh();
-    window.addEventListener('luma-data-changed', onDataChanged);
-    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.__lumaBack = () => {
+      if (back.handle()) return true;
+      if (app.page !== 'today') {
+        app.go('today');
+        return true;
+      }
+      return false;
+    };
+    const onScheme = () => (systemDark = systemPrefersDark());
+    // Kotlin reports Android's dark mode directly; WebView's media query can lag behind it.
+    const onNativeScheme = (event: Event) => {
+      const dark = (event as CustomEvent<{ dark?: boolean }>).detail?.dark;
+      systemDark = typeof dark === 'boolean' ? dark : systemPrefersDark();
+    };
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      app.tick();
+      void app.reload();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') window.__lumaBack?.();
+    };
+    media.addEventListener('change', onScheme);
+    window.addEventListener('luma-system-theme', onNativeScheme);
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('keydown', onKey);
+    const clock = setInterval(() => app.tick(), 30_000);
+    void app.start().then(() => importSession.resume());
+    return () => {
+      media.removeEventListener('change', onScheme);
+      window.removeEventListener('luma-system-theme', onNativeScheme);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('keydown', onKey);
+      clearInterval(clock);
+    };
   });
-  onDestroy(() => {
-    window.removeEventListener('luma-data-changed', onDataChanged);
-    document.removeEventListener('visibilitychange', onVisibilityChange);
-    if (midnightTimer) clearTimeout(midnightTimer);
-  });
-
-  $: cssVars = `--glass-blur:${glass.blur}px;--glass-opacity:${glass.opacity / 100};--glass-sat:${glass.saturation}%;--glass-highlight:${glass.highlight / 100};--glass-refraction:${glass.refraction / 100};--glass-noise:${glass.noise / 100}`;
 </script>
 
-<div class="app-shell" style={cssVars} class:motion={glass.motion} class:runtime-ready={runtimeReady} class:colorful-courses={colorfulCourses}>
-  <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div>
-  <aside class="sidebar glass-panel">
-    <button class="brand" aria-label="返回今日" on:click={() => (page = 'today')}><span class="brand-mark"><Sparkles size={20} strokeWidth={1.8} /></span><span class="brand-copy"><b>Luma</b><small>Schedule</small></span></button>
-    <nav class="desktop-nav">{#each nav as item}<button class:active={page === item.id} on:click={() => (page = item.id)}><svelte:component this={item.icon} size={20} strokeWidth={1.75} /><span>{item.label}</span></button>{/each}</nav>
-    <div class="sidebar-status"><span class="status-dot"></span><div><b>{runtimeReady ? (liveData ? '本地数据库' : '离线模式') : '正在载入'}</b><small>{liveData ? 'SQLite 已就绪' : '等待本地数据'}</small></div></div>
-  </aside>
-  <main class="main-stage">
-    {#if page === 'today'}
-      <Today courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} preferences={schedulePreferences} />
-    {:else if page === 'week'}
-      <Week courses={runtimeCourses} hasSchedule={scheduleSnapshot.hasSchedule} currentWeek={scheduleSnapshot.currentWeek} termName={scheduleSnapshot.termName} preferences={schedulePreferences} {colorfulCourses} on:changed={loadRuntimeData} />
-    {:else if page === 'grades'}
-      <Grades />
-    {:else if page === 'import'}
-      <ImportCenter on:imported={loadRuntimeData} />
-    {:else if page === 'widgets'}
-      <Widgets />
+<div class="shell">
+  <nav class="tabbar" aria-label="主导航">
+    {#each nav as item (item.id)}
+      {@const Icon = item.icon}
+      <button class:active={app.page === item.id} type="button" aria-current={app.page === item.id ? 'page' : undefined} onclick={() => app.go(item.id)}>
+        <span class="tab-icon"><Icon size={21} strokeWidth={app.page === item.id ? 2.25 : 1.9} /></span>
+        <span class="tab-label">{item.label}</span>
+      </button>
+    {/each}
+  </nav>
+
+  <main>
+    {#if app.page === 'today'}
+      <TodayPage />
+    {:else if app.page === 'week'}
+      <WeekPage />
+    {:else if app.page === 'grades'}
+      <GradesPage />
+    {:else if app.page === 'import'}
+      <ImportPage />
     {:else}
-      <Settings bind:glass bind:colorfulCourses preferences={schedulePreferences} on:changed={loadRuntimeData} />
+      <SettingsPage />
     {/if}
   </main>
-  <nav class="mobile-nav glass-panel" aria-label="主导航">{#each nav as item}<button class:active={page === item.id} on:click={() => (page = item.id)} aria-label={item.label}><svelte:component this={item.icon} size={20} strokeWidth={1.8} /><span>{item.label}</span></button>{/each}</nav>
 </div>
 
+<CourseDetailSheet />
+<CourseEditorSheet />
+<ConfirmHost />
+<Toasts />
+
 <style>
-  @media (max-width: 760px) {
-    .mobile-nav { grid-template-columns: repeat(6, 1fr); }
-    .mobile-nav button { font-size: 9px; }
+  .shell {
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+
+  .tabbar {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 100;
+    display: flex;
+    height: calc(var(--tabbar-height) + var(--inset-bottom));
+    padding: 0 calc(var(--inset-right) + 4px) var(--inset-bottom) calc(var(--inset-left) + 4px);
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .tabbar button {
+    display: grid;
+    flex: 1 1 0;
+    align-content: center;
+    justify-items: center;
+    gap: 2px;
+    min-width: 0;
+    border: 0;
+    background: none;
+    color: var(--text-3);
+  }
+
+  .tab-icon {
+    display: grid;
+    place-items: center;
+    width: 54px;
+    height: 28px;
+    border-radius: 14px;
+    transition: background-color 0.2s;
+  }
+
+  .tab-label {
+    font-size: var(--text-xs);
+    font-weight: 550;
+    line-height: 1.2;
+  }
+
+  .tabbar button.active {
+    color: var(--accent);
+  }
+
+  .tabbar button.active .tab-icon {
+    background: var(--accent-soft);
+  }
+
+  @media (min-width: 900px) {
+    .tabbar {
+      top: 0;
+      right: auto;
+      width: 88px;
+      height: auto;
+      flex-direction: column;
+      justify-content: flex-start;
+      gap: 6px;
+      padding: calc(var(--inset-top) + 24px) 0 24px calc(var(--inset-left));
+      border-top: 0;
+      border-right: 1px solid var(--border);
+    }
+
+    .tabbar button {
+      flex: none;
+      height: 64px;
+    }
+
+    main {
+      padding-left: 88px;
+      --tabbar-height: 0px;
+    }
   }
 </style>

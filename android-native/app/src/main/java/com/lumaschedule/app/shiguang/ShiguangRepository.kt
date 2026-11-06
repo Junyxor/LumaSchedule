@@ -140,7 +140,9 @@ class ShiguangRepository(private val context: Context) {
         }
 
         val prefs = context.getSharedPreferences(ShiguangImportActivity.PREFS_NAME, Context.MODE_PRIVATE)
+        purgeStaleSessions()
         prefs.edit()
+            .putString(ShiguangImportActivity.key(sessionId, "created_at"), System.currentTimeMillis().toString())
             .putString(ShiguangImportActivity.key(sessionId, "status"), "running")
             .putString(ShiguangImportActivity.key(sessionId, "message"), initialMessage)
             .putString(ShiguangImportActivity.key(sessionId, "adapter_name"), adapterName)
@@ -208,10 +210,25 @@ class ShiguangRepository(private val context: Context) {
     fun closeSession(sessionId: String) {
         val prefs = context.getSharedPreferences(ShiguangImportActivity.PREFS_NAME, Context.MODE_PRIVATE)
         val editor = prefs.edit()
-        for (field in listOf("status", "message", "courses", "time_slots", "config", "grades", "grade_meta", "adapter_name", "school_name", "source_sha256", "capture_kind")) {
-            editor.remove(ShiguangImportActivity.key(sessionId, field))
-        }
+        for (field in SESSION_FIELDS) editor.remove(ShiguangImportActivity.key(sessionId, field))
         editor.apply()
+    }
+
+    /** Sessions abandoned by a killed process keep large course payloads around; drop them after a day. */
+    private fun purgeStaleSessions() {
+        val prefs = context.getSharedPreferences(ShiguangImportActivity.PREFS_NAME, Context.MODE_PRIVATE)
+        val cutoff = System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+        val sessions = prefs.all.keys.mapNotNull { key -> key.substringBeforeLast('.', "").takeIf { it.isNotEmpty() } }.toSet()
+        val editor = prefs.edit()
+        var removed = false
+        for (session in sessions) {
+            val created = prefs.getString(ShiguangImportActivity.key(session, "created_at"), null)?.toLongOrNull() ?: 0L
+            if (created < cutoff) {
+                for (field in SESSION_FIELDS) editor.remove(ShiguangImportActivity.key(session, field))
+                removed = true
+            }
+        }
+        if (removed) editor.apply()
     }
 
     private fun buildGradeBundle(schoolName: String, adapterName: String, gradesRaw: String, metaRaw: String?): JSONObject {
@@ -530,9 +547,35 @@ class ShiguangRepository(private val context: Context) {
 
     companion object {
         private val GENERIC_FAMILIES = setOf("zhengfang_jiaowu", "qingguo_jiaowu", "urp_jiaowu", "chaoxing_jiaowu")
+        private val SESSION_FIELDS = listOf(
+            "created_at", "status", "message", "courses", "time_slots", "config", "grades", "grade_meta",
+            "adapter_name", "school_name", "source_sha256", "capture_kind"
+        )
+
+        /**
+         * Many教务 systems (正方, 青果 …) render the timetable or grade table inside
+         * same-origin iframes. Collect tables and text from every reachable frame.
+         */
+        private const val FRAME_HELPERS = """
+  const lumaDocuments = () => {
+    const result = [];
+    const visit = (doc, depth) => {
+      if (!doc || depth > 4 || result.includes(doc)) return;
+      result.push(doc);
+      for (const frame of Array.from(doc.querySelectorAll('iframe,frame'))) {
+        try { visit(frame.contentDocument, depth + 1); } catch (error) { /* cross-origin frame */ }
+      }
+    };
+    visit(document, 0);
+    return result;
+  };
+  const lumaTables = () => lumaDocuments().flatMap((doc) => Array.from(doc.querySelectorAll('table')));
+  const lumaPageText = () => lumaDocuments().map((doc) => String(doc.body && doc.body.innerText || '')).join('\n');
+"""
 
         private val SMART_SCHEDULE_CAPTURE_SCRIPT = """
 (async () => {
+${FRAME_HELPERS}
   const clean = (value) => String(value == null ? '' : value).replace(/\u00a0/g, ' ').replace(/[ \t]+/g, ' ').trim();
   const cellText = (node) => clean(node && (node.innerText || node.textContent));
   const weekdayOf = (raw) => {
@@ -542,12 +585,17 @@ class ShiguangRepository(private val context: Context) {
     const match = text.match(/(?:星期|周)\s*([1-7])/);
     return match ? Number(match[1]) : 0;
   };
-  const sectionRange = (raw) => {
+  // Inside a course cell a bare "1-16" is usually the week range, so sections need 第/节.
+  // `loose` is only used for dedicated section columns and row headers.
+  const sectionRange = (raw, loose) => {
     const text = clean(raw);
-    let match = text.match(/第?\s*(\d{1,2})\s*[-~—–至到]\s*(\d{1,2})\s*节?/);
+    let match = text.match(/第\s*(\d{1,2})\s*[-~—–至到]\s*(\d{1,2})\s*节?/) || text.match(/(\d{1,2})\s*[-~—–至到]\s*(\d{1,2})\s*节/);
     if (match) return [Number(match[1]), Number(match[2])];
-    match = text.match(/第\s*(\d{1,2})\s*节/);
-    return match ? [Number(match[1]), Number(match[1])] : null;
+    match = text.match(/第\s*(\d{1,2})\s*节/) || text.match(/(\d{1,2})\s*节/);
+    if (match) return [Number(match[1]), Number(match[1])];
+    if (!loose) return null;
+    match = text.match(/^(\d{1,2})\s*(?:[-~—–至到]\s*(\d{1,2}))?$/);
+    return match ? [Number(match[1]), Number(match[2] || match[1])] : null;
   };
   const weeksOf = (raw) => {
     const text = clean(raw);
@@ -562,8 +610,8 @@ class ShiguangRepository(private val context: Context) {
       const singles = text.matchAll(/(?:第)?\s*(\d{1,2})\s*周/g);
       for (const match of singles) result.add(Math.max(1, Math.min(64, Number(match[1]))));
     }
-    const odd = /单周|单数周/.test(text);
-    const even = /双周|偶数周/.test(text);
+    const odd = /单周|单数周|[(（\[]\s*单\s*[)）\]]/.test(text);
+    const even = /双周|偶数周|[(（\[]\s*双\s*[)）\]]/.test(text);
     if ((odd || even) && result.size) {
       for (const week of Array.from(result)) if ((odd && week % 2 === 0) || (even && week % 2 === 1)) result.delete(week);
     }
@@ -577,7 +625,9 @@ class ShiguangRepository(private val context: Context) {
     }
     return '';
   };
-  const guessLocation = (lines) => lines.find((line) => /(教室|实验室|楼|校区|馆|室\b|区\b)/.test(line) && !/(周|节)/.test(line)) || '';
+  // Rooms look like "教6-401", "A302" or "理学馆201": a line with a digit or a building word
+  // that is neither the course name, the week/section range nor the teacher.
+  const guessLocation = (lines, name) => lines.find((line) => line !== name && /(教室|实验室|楼|校区|馆|室|区|\d)/.test(line) && !/(周|节|教师|老师|学分)/.test(line)) || '';
   const guessTeacher = (lines) => field(lines.join('\n'), ['教师','老师','任课教师']) || '';
   const guessName = (lines) => lines.find((line) => line && !/(第?\d+.*周|第?\d+.*节|教师|老师|教室|地点|星期|周[一二三四五六日天])/.test(line)) || '';
   const records = [];
@@ -592,7 +642,7 @@ class ShiguangRepository(private val context: Context) {
   };
   const findIndex = (headers, rules) => headers.findIndex((header) => rules.some((rule) => rule.test(header)));
 
-  for (const table of Array.from(document.querySelectorAll('table'))) {
+  for (const table of lumaTables()) {
     const rows = Array.from(table.querySelectorAll('tr'));
     for (let headerIndex = 0; headerIndex < Math.min(rows.length, 8); headerIndex += 1) {
       const headers = Array.from(rows[headerIndex].querySelectorAll('th,td')).map(cellText);
@@ -605,7 +655,7 @@ class ShiguangRepository(private val context: Context) {
       const weeksIndex = findIndex(headers, [/周次/i,/教学周/i,/上课周/i]);
       for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex += 1) {
         const cells = Array.from(rows[rowIndex].querySelectorAll('th,td')).map(cellText);
-        const range = sectionRange(cells[sectionIndex] || '');
+        const range = sectionRange(cells[sectionIndex] || '', true);
         const day = weekdayOf(cells[dayIndex] || '');
         if (!range || !day) continue;
         push({
@@ -623,7 +673,7 @@ class ShiguangRepository(private val context: Context) {
   }
 
   if (!records.length) {
-    for (const table of Array.from(document.querySelectorAll('table'))) {
+    for (const table of lumaTables()) {
       const rows = Array.from(table.querySelectorAll('tr'));
       let headerIndex = -1;
       let dayColumns = [];
@@ -636,7 +686,7 @@ class ShiguangRepository(private val context: Context) {
       for (let rowIndex = headerIndex + 1; rowIndex < rows.length; rowIndex += 1) {
         const cells = Array.from(rows[rowIndex].querySelectorAll('th,td'));
         const rowText = cells.map(cellText);
-        const rowRange = sectionRange(rowText.slice(0, 2).join(' '));
+        const rowRange = sectionRange(rowText[0] || '', true) || ((rowText[1] || '').length <= 8 ? sectionRange(rowText[1] || '', true) : null);
         for (const pair of dayColumns) {
           const column = pair[0]; const day = pair[1];
           const raw = cellText(cells[column]);
@@ -649,7 +699,7 @@ class ShiguangRepository(private val context: Context) {
           push({
             name,
             teacher: guessTeacher(lines),
-            position: field(raw, ['教室','地点','上课地点']) || guessLocation(lines),
+            position: field(raw, ['教室','地点','上课地点']) || guessLocation(lines, name),
             day,
             startSection: range[0],
             endSection: range[1],
@@ -670,7 +720,7 @@ class ShiguangRepository(private val context: Context) {
     return;
   }
 
-  const bodyText = clean(document.body && document.body.innerText);
+  const bodyText = clean(lumaPageText());
   const termMatch = bodyText.match(/20\d{2}\s*[-—–~至]\s*20?\d{2}\s*学年.{0,12}(?:第一|第二|第1|第2|春|秋).{0,4}学期/);
   if (termMatch) {
     await window.shiguangBridgePromise.saveCourseConfig(JSON.stringify({ semesterName: clean(termMatch[0]), semesterStartDate: '' }));
@@ -683,6 +733,7 @@ class ShiguangRepository(private val context: Context) {
 
         private val GRADE_CAPTURE_SCRIPT = """
 window.__LUMA_CAPTURE_GRADES__ = async function () {
+${FRAME_HELPERS}
   const text = (node) => String(node && node.textContent || '').replace(/\s+/g, ' ').trim();
   const cellsOf = (row) => Array.from(row.querySelectorAll('th,td')).map(text);
   const findColumn = (headers, rules) => headers.findIndex((header) => rules.some((rule) => rule.test(header)));
@@ -694,14 +745,14 @@ window.__LUMA_CAPTURE_GRADES__ = async function () {
     return Number.isFinite(number) ? number : null;
   };
   const termFromPage = () => {
-    const body = String(document.body && document.body.innerText || '').replace(/\s+/g, ' ');
+    const body = lumaPageText().replace(/\s+/g, ' ');
     const match = body.match(/20\d{2}\s*[-—–~至]\s*20?\d{2}\s*学年.{0,10}(?:第一|第二|第1|第2|春|秋).{0,4}学期/);
     return match ? match[0].replace(/\s+/g, '') : '';
   };
 
   let best = [];
   let bestTerm = '';
-  const tables = Array.from(document.querySelectorAll('table'));
+  const tables = lumaTables();
   for (const table of tables) {
     const rows = Array.from(table.querySelectorAll('tr'));
     for (let headerIndex = 0; headerIndex < Math.min(rows.length, 6); headerIndex += 1) {
@@ -764,6 +815,12 @@ window.__LUMA_CAPTURE_GRADES__ = async function () {
   window.shiguangBridge.showToast('识别到 ' + best.length + ' 条成绩，正在返回 LumaSchedule 预览。');
   window.shiguangBridge.notifyTaskCompletion();
 };
+// The 「读取成绩」 button sets this flag before re-injecting, so the capture runs
+// even when the grade page lives on the same host as the login page.
+if (window.__LUMA_CAPTURE_REQUESTED__) {
+  window.__LUMA_CAPTURE_REQUESTED__ = false;
+  window.__LUMA_CAPTURE_GRADES__();
+}
 """.trimIndent()
     }
 }

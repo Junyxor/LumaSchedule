@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="luma_accent">#5B56D6</color>
+    <color name="window_background">#F3F4F7</color>
+    <color name="widget_background">#F7FFFFFF</color>
+    <color name="widget_stroke">#14161826</color>
+    <color name="widget_title">#161824</color>
+    <color name="widget_meta">#6E7180</color>
+    <color name="widget_label">#5B56D6</color>
+    <color name="widget_badge_background">#1A5B56D6</color>
+</resources>

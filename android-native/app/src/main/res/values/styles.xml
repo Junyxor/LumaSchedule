@@ -1,13 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
-        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">@color/window_background</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:colorAccent">#5B56D6</item>
+        <item name="android:colorAccent">@color/luma_accent</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+
+    <!-- The教务 login window always shows a light browser-like chrome. -->
+    <style name="ImportTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:colorAccent">#5B56D6</item>
+        <item name="android:statusBarColor">@android:color/white</item>
+        <item name="android:navigationBarColor">#F8F9FB</item>
+        <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowNoTitle">true</item>
     </style>
 </resources>
