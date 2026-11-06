@@ -270,14 +270,20 @@ export function buildSectionTimes(semester: Semester, count: number): SectionTim
   return result;
 }
 
-/** True when the course's start or end time is a typical-day estimate rather than a known time. */
-export function courseTimeEstimated(course: Course, sections: SectionTime[]) {
+/** Whether the course's start and end come from real data: the course itself, the saved timetable or other courses. */
+export function courseTimeKnown(course: Course, sections: SectionTime[]) {
   const first = Math.max(1, course.startSection || 1);
   const last = Math.max(first, course.endSection || first);
-  return (
-    (parseClock(course.startTime) === null && sections[first - 1]?.estimated !== false) ||
-    (parseClock(course.endTime) === null && sections[last - 1]?.estimated !== false)
-  );
+  return {
+    start: parseClock(course.startTime) !== null || sections[first - 1]?.estimated === false,
+    end: parseClock(course.endTime) !== null || sections[last - 1]?.estimated === false
+  };
+}
+
+/** True when the course's start or end time is a typical-day estimate rather than a known time. */
+export function courseTimeEstimated(course: Course, sections: SectionTime[]) {
+  const known = courseTimeKnown(course, sections);
+  return !known.start || !known.end;
 }
 
 export interface TimeRange {
