@@ -110,7 +110,9 @@ class MainActivity : Activity() {
                 View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
                 View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
         }
-        applySystemBarColors()
+        // Some Android builds crash if PhoneWindow's insets controller is read before
+        // the decor view is attached. View.post runs once the decor is attached.
+        window.decorView.post { applySystemBarColors() }
     }
 
     private fun applySystemBarColors() {
@@ -119,7 +121,8 @@ class MainActivity : Activity() {
         if (::webView.isInitialized) webView.setBackgroundColor(background)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-            window.insetsController?.setSystemBarsAppearance(if (darkBars) 0 else mask, mask)
+            // View-level lookup safely returns null while detached, unlike PhoneWindow's getter.
+            window.decorView.windowInsetsController?.setSystemBarsAppearance(if (darkBars) 0 else mask, mask)
         } else {
             @Suppress("DEPRECATION")
             var flags = window.decorView.systemUiVisibility and
