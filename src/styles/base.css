@@ -8,6 +8,8 @@ html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   background: var(--bg);
+  /* Block accidental horizontal document scrolling on mobile WebView. */
+  overflow-x: clip;
 }
 
 body {
@@ -23,6 +25,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
+  overflow-x: clip;
   touch-action: manipulation;
 }
 
