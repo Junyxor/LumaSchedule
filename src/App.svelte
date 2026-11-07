@@ -113,8 +113,16 @@
 
 <style>
   .shell {
+    width: 100%;
+    min-width: 0;
     min-height: 100vh;
     min-height: 100dvh;
+  }
+
+  main {
+    width: 100%;
+    min-width: 0;
+    overflow-x: clip;
   }
 
   .tabbar {
