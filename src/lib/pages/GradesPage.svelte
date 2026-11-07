@@ -133,6 +133,17 @@
     return [...map.entries()].sort((a, b) => termKey(b[0]) - termKey(a[0]) || b[0].localeCompare(a[0]));
   });
 
+  // The remembered SSO URL may contain a very long, percent-encoded service query.
+  // Show only its origin/path; retain the exact URL for the actual capture action.
+  function sourceLabel(value: string): string {
+    try {
+      const parsed = new URL(value);
+      return `${parsed.host}${parsed.pathname === '/' ? '' : parsed.pathname}`;
+    } catch {
+      return value.split('?')[0];
+    }
+  }
+
   function format(value: number | null, digits: number) {
     return value === null || !Number.isFinite(value) ? '—' : value.toFixed(digits);
   }
@@ -314,7 +325,7 @@
       <div class="recent">
         <div>
           <b>{recent.schoolName || '最近使用的教务系统'}</b>
-          <span>{recent.url}</span>
+          <span title={recent.url}>{sourceLabel(recent.url)}</span>
         </div>
         <button class="btn btn-primary" type="button" onclick={() => capture(recent)} disabled={!!session}>读取成绩</button>
       </div>
@@ -605,6 +616,10 @@
 
   .capture {
     display: grid;
+    /* Keep min-content from long school login URLs from widening the CSS grid. */
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+    max-width: 100%;
     gap: 10px;
   }
 
@@ -612,6 +627,8 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .recent div {
@@ -621,10 +638,15 @@
 
   .recent b {
     display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .recent span {
     display: block;
+    width: 100%;
+    max-width: 100%;
     overflow: hidden;
     color: var(--text-3);
     font-size: var(--text-xs);
@@ -649,7 +671,19 @@
   }
 
   .manual {
+    grid-template-columns: minmax(0, 1fr);
+    min-width: 0;
+    max-width: 100%;
     margin-top: 4px;
+  }
+
+  .manual .row {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .manual .input {
+    max-width: 100%;
   }
 
   .spacer {
