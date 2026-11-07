@@ -1,10 +1,10 @@
 {
   "version": "0.1.6",
-  "target": "dd5563a828b9e707879ea8473b19185ee5b26041",
+  "target": "aa06e3b6c9897a8dad2d4d6b23d5bd312a0b3236",
   "title": "LumaSchedule v0.1.6｜全新简洁界面与课程提醒改进",
-  "tagMessage": "LumaSchedule v0.1.6 正式版\n\n界面与交互全面重构，周课表课程卡显示上、下课时间；修复 Android 周次、学分与时间规则，增强课程提醒、小组件更新及系统导航适配。",
-  "notes": "# LumaSchedule v0.1.6\n\nLumaSchedule v0.1.6 **正式版**发布。本次版本基于已通过 CI、Android Native 构建及签名发布验证的 `v0.1.6-beta.1` 代码。\n\n## 主要更新\n\n- **全新简洁界面**：用 Svelte 5 runes 重构界面状态和页面，统一扁平化设计；改进今日、周课表、成绩、教务导入及设置页面。\n- **更直观的周课表**：课程卡直接显示上、下课时间，减少反复查看详情的操作（PR #18）。\n- **课程信息和周次修复**：修复周次、学分、截止时间与上课时间处理中的边界情况（PR #19）。\n- **提醒可靠性提升**：改进 Android 课程提醒滚动续排、时间变化后的提醒调度以及桌面小组件更新。\n- **原生体验完善**：优化返回键处理与状态栏、导航栏边距适配。\n- **高校适配同步**：更新拾光课程表高校教务适配快照。\n\n## 安装与更新\n\n- Android 8.0 及以上（API 26+）。\n- 推荐下载 `LumaSchedule-v0.1.6.apk` 直接安装。已安装官方正式签名版本的用户可以使用相同签名升级。\n- `.aab` 供应用商店分发使用，不用于直接安装。\n- 建议升级前备份课程与成绩数据。\n\n## 构建与校验\n\n- 发布源代码提交已通过 CI 与 Android Native 测试。\n- Release 工作流使用仓库现有长期 Android 正式签名密钥构建 APK / AAB，验证签名并发布 `SHA256SUMS.txt` 与 `SIGNING-CERTIFICATE.txt`。\n\n## 版本信息\n\n- Tag：`v0.1.6`\n- Android versionName：`0.1.6`\n- Android versionCode：`100699`\n- 发布类型：Stable / 正式版\n- 发布源代码：`dd5563a828b9e707879ea8473b19185ee5b26041`\n",
+  "tagMessage": "LumaSchedule v0.1.6 Android 15 startup crash hotfix\n\nDefer system bar appearance until the decor view is attached; keep stable release version and signing.",
+  "notes": "# LumaSchedule v0.1.6\n\nLumaSchedule v0.1.6 **正式版**发布。本次正式版在原有 `v0.1.6` 基础上补充 Android 15 启动闪退热修复。\n\n## 主要更新\n\n- **全新简洁界面**：用 Svelte 5 runes 重构界面状态和页面，统一扁平化设计；改进今日、周课表、成绩、教务导入及设置页面。\n- **更直观的周课表**：课程卡直接显示上、下课时间，减少反复查看详情的操作（PR #18）。\n- **课程信息和周次修复**：修复周次、学分、截止时间与上课时间处理中的边界情况（PR #19）。\n- **提醒可靠性提升**：改进 Android 课程提醒滚动续排、时间变化后的提醒调度以及桌面小组件更新。\n- **原生体验完善**：优化返回键处理与状态栏、导航栏边距适配。\n- **高校适配同步**：更新拾光课程表高校教务适配快照。\n\n## 2026-11-07 热修复\n\n- 修复 Android 15 / 部分设备启动时 `PhoneWindow.getInsetsController()` 引发的空指针崩溃。\n- 在 DecorView 附着后再配置状态栏、导航栏外观，避免初始化时序问题。\n- 使用原有正式签名重新构建并替换 APK / AAB；版本号仍为 `0.1.6`。\n\n## 安装与更新\n\n- Android 8.0 及以上（API 26+）。\n- 推荐下载 `LumaSchedule-v0.1.6.apk` 直接安装。已安装官方正式签名版本的用户可以使用相同签名升级。\n- `.aab` 供应用商店分发使用，不用于直接安装。\n- 建议升级前备份课程与成绩数据。\n\n## 构建与校验\n\n- 发布源代码提交已通过 CI 与 Android Native 测试。\n- Release 工作流使用仓库现有长期 Android 正式签名密钥构建 APK / AAB，验证签名并发布 `SHA256SUMS.txt` 与 `SIGNING-CERTIFICATE.txt`。\n\n## 版本信息\n\n- Tag：`v0.1.6`\n- Android versionName：`0.1.6`\n- Android versionCode：`100699`\n- 发布类型：Stable / 正式版\n- 发布源代码：`aa06e3b6c9897a8dad2d4d6b23d5bd312a0b3236`\n",
   "metadataOnly": false,
   "prerelease": false,
-  "requestNonce": "release-v0.1.6-stable-20261106-dd5563a"
+  "requestNonce": "release-v0.1.6-hotfix-20261107-aa06e3b"
 }
