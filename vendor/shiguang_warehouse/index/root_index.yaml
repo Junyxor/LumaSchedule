@@ -108,6 +108,11 @@ schools:
     initial: "Y"
     resource_folder: "YNUFE"
 
+  - id: "KUST"
+    name: "昆明理工大学"
+    initial: "K"
+    resource_folder: "KUST"
+
   - id: "HNSF"
     name: "河南师范大学"
     initial: "H"
@@ -517,6 +522,11 @@ schools:
     name: "大连大学"
     initial: "D"
     resource_folder: "DLU"
+
+  - id: "DLNU"
+    name: "大连民族大学"
+    initial: "D"
+    resource_folder: "DLNU"
 
   - id: "HBMU"
     name: "湖北医药学院"
@@ -1138,6 +1148,11 @@ schools:
     initial: "Q"
     resource_folder: "QFNU"
 
+  - id: "QJNU"
+    name: "曲靖师范学院"
+    initial: "Q"
+    resource_folder: "QJNU"
+
   - id: "SCEMI"
     name: "四川机电职业技术学院"
     initial: "S"
@@ -1392,3 +1407,8 @@ schools:
     name: "天津理工大学"
     initial: "T"
     resource_folder: "TJUT"    
+
+  - id: "CWNU"
+    name: "西华师范大学"
+    initial: "X"
+    resource_folder: "CWNU"
