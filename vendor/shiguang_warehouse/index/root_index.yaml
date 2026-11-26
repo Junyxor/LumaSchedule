@@ -233,6 +233,11 @@ schools:
     initial: "F"
     resource_folder: "FVTI"
 
+  - id: "FZACC"
+    name: "福州英华职业学院"
+    initial: "F"
+    resource_folder: "FZACC"
+
   - id: "FOSU"
     name: "佛山大学"
     initial: "F"
@@ -527,6 +532,11 @@ schools:
     name: "大连民族大学"
     initial: "D"
     resource_folder: "DLNU"
+
+  - id: "DJTU"
+    name: "大连交通大学"
+    initial: "D"
+    resource_folder: "DJTU"
 
   - id: "HBMU"
     name: "湖北医药学院"
@@ -1047,6 +1057,11 @@ schools:
     name: "南阳师范学院"
     initial: "N"
     resource_folder: "NYNU"
+
+  - id: "NYIST"
+    name: "南阳理工学院"
+    initial: "N"
+    resource_folder: "NYIST"
 
   - id: "NCHU"
     name: "南昌航空大学"
